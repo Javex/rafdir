@@ -27,6 +27,11 @@ type SnapshotClient struct {
 	backupNamespace string
 	sleepDuration   time.Duration
 	waitTimeout     time.Duration
+	podWaitTimeout  time.Duration
+	podCreateWait   time.Duration
+
+	image   string
+	command []string
 
 	log *slog.Logger
 }
@@ -50,6 +55,10 @@ func NewClient(kubeconfig *string, snapshotClass string, snapshotDriver string, 
 		backupNamespace: backupNamespace,
 		sleepDuration:   sleepDuration,
 		waitTimeout:     waitTimeout,
+		podCreateWait:   1 * time.Minute,
+		podWaitTimeout:  5 * time.Minute,
+
+		image: "ghcr.io/javex/resticprofile-kubernetes:0.29.0",
 
 		log: slog.Default(),
 	}
@@ -70,6 +79,7 @@ func (s *SnapshotClient) TakeBackup() error {
 	snapshotContentName := fmt.Sprintf("grafana-snapcontent-%s", runSuffix)
 	backupPVCName := fmt.Sprintf("grafana-%s", runSuffix)
 	storageSize := "10Gi"
+	podName := fmt.Sprintf("backup-grafana-%s", runSuffix)
 	// selector := "app.kubernetes.io/name=grafana"
 
 	// oldReplicas, err := s.ScaleTo(ctx, namespace, name, 0)
@@ -134,6 +144,14 @@ func (s *SnapshotClient) TakeBackup() error {
 		return fmt.Errorf("Failed to PVCFromSnapshot: %s", err)
 	}
 	defer s.DeletePVC(ctx, backupPVCName)
+
+	err = s.CreateBackupPod(ctx, podName, backupPVCName)
+	if err != nil {
+		return fmt.Errorf("Failed to CreateBackupPod: %s", err)
+	}
+	s.WaitPod(ctx, podName)
+	// defer s.DeletePod(ctx, podName)
+
 	return nil
 }
 
@@ -536,14 +554,274 @@ func (s *SnapshotClient) PVCFromSnapshot(ctx context.Context, snapshotName strin
 }
 
 func (s *SnapshotClient) DeletePVC(ctx context.Context, pvcName string) error {
-	err := s.kubeClient.CoreV1().
+	log := s.log.With("namespace", s.backupNamespace, "pvcName", pvcName)
+	pvc, err := s.kubeClient.CoreV1().
+		PersistentVolumeClaims(s.backupNamespace).
+		Get(ctx, pvcName, metav1.GetOptions{})
+	if err != nil {
+		if k8sErrors.IsNotFound(err) {
+			log.Warn("PVC does not exist, skipping deletion. Warning: PersistentVolume might still exist and be dangling")
+			return nil
+		}
+		log.Error("Unexpected error when checking if PVC exists", "err", err)
+		return err
+	}
+	pvName := pvc.Spec.VolumeName
+
+	err = s.kubeClient.CoreV1().
 		PersistentVolumeClaims(s.backupNamespace).
 		Delete(ctx, pvcName, metav1.DeleteOptions{})
 	if err != nil {
-		s.log.Error("Error deleting PVC", "namespace", s.backupNamespace, "pvcName", pvcName, "err", err)
+		s.log.Error("Error deleting PVC", "err", err)
 		return err
 	}
 
-	s.log.Info("Deleted PVC", "namespace", s.backupNamespace, "pvcName", pvcName)
+	log.Info("Deleted PVC")
+
+	err = s.kubeClient.CoreV1().
+		PersistentVolumes().
+		Delete(ctx, pvName, metav1.DeleteOptions{})
+	if err != nil {
+		log.Error("Error deleting PV", "pvName", pvName)
+	}
+	log.Info("Deleted PV", "pvName", pvName)
+	return nil
+}
+
+func (s *SnapshotClient) CreateBackupPod(ctx context.Context, podName string, backupPVCName string) error {
+	log := s.log.With("namespace", s.backupNamespace, "podName", podName)
+
+	pod, err := s.kubeClient.CoreV1().
+		Pods(s.backupNamespace).
+		Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		if !k8sErrors.IsNotFound(err) {
+			log.Error("Error when checking if pod already exists", "err", err)
+			return err
+		}
+	} else {
+		log.Warn("Pod already exists, not creating")
+		return nil
+	}
+
+	optional := false
+	var readWriteMode int32 = 0775
+
+	pod = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: s.backupNamespace,
+		},
+		Spec: corev1.PodSpec{
+			ServiceAccountName: "restic",
+			RestartPolicy:      corev1.RestartPolicyNever,
+			Containers: []corev1.Container{
+				{
+					Name:    "resticprofile",
+					Image:   s.image,
+					Command: []string{"sh"},
+					Args:    []string{"/usr/local/bin/backup.sh"},
+					VolumeMounts: []corev1.VolumeMount{
+						{Name: "storage", MountPath: "/var/lib/grafana"},
+						{Name: "restic-cfg", MountPath: "/etc/restic", ReadOnly: true},
+						{Name: "restic-script", MountPath: "/usr/local/bin"},
+						{Name: "restic-cache", MountPath: "/var/cache/restic"},
+						{Name: "nfs-restic-repo", MountPath: "/mnt/kubernetes-restic"},
+					},
+
+					Env: []corev1.EnvVar{
+						{
+							Name: "AWS_ACCESS_KEY_ID",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "restic-secrets-99h2kd82b9",
+									},
+									Key:      "backblaze-key-id",
+									Optional: &optional,
+								},
+							},
+						},
+						{
+							Name: "AWS_SECRET_ACCESS_KEY",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "restic-secrets-99h2kd82b9",
+									},
+									Key:      "backblaze-application-key",
+									Optional: &optional,
+								},
+							},
+						},
+						{
+							Name: "RESTIC_PASSWORD",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "restic-secrets-99h2kd82b9",
+									},
+									Key:      "restic-repo-password",
+									Optional: &optional,
+								},
+							},
+						},
+					},
+					// End EnvVars
+				},
+			},
+			// End Containers
+
+			Volumes: []corev1.Volume{
+				{
+					Name: "storage",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: backupPVCName,
+						},
+					},
+				},
+				{
+					Name: "restic-cfg",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "restic-config-6652d487mc",
+							},
+							DefaultMode: &readWriteMode,
+						},
+					},
+				},
+				{
+					Name: "restic-script",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "restic-script-4kk5kcg724",
+							},
+							DefaultMode: &readWriteMode,
+						},
+					},
+				},
+				{
+					Name: "restic-cache",
+					VolumeSource: corev1.VolumeSource{
+						EmptyDir: &corev1.EmptyDirVolumeSource{},
+					},
+				},
+				{
+					Name: "nfs-restic-repo",
+					VolumeSource: corev1.VolumeSource{
+						NFS: &corev1.NFSVolumeSource{
+							Server: "10.0.20.10",
+							Path:   "/mnt/kubernetes-restic",
+						},
+					},
+				},
+			},
+			// End Volumes
+
+		},
+	}
+	_, err = s.kubeClient.CoreV1().
+		Pods(s.backupNamespace).
+		Create(ctx, pod, metav1.CreateOptions{})
+	if err != nil {
+		log.Error("Failed to create pod", "err", err)
+		return err
+	}
+
+	log.Info("Pod created")
+	return nil
+}
+
+func (s *SnapshotClient) WaitPod(ctx context.Context, podName string) error {
+	log := s.log.With("namespace", s.backupNamespace, "podName", podName)
+
+	// Wait for ContainerCreating to be finished
+	// Shorter timeout than the entire run to detect issues early
+	createCtx, createCancel := context.WithTimeout(ctx, s.podCreateWait)
+	defer createCancel()
+CreateLoop:
+	for {
+		select {
+		case <-createCtx.Done():
+			log.Error("Timed out waiting for pod to enter running state")
+			return fmt.Errorf("Timeout")
+		default:
+			pod, err := s.kubeClient.CoreV1().
+				Pods(s.backupNamespace).
+				Get(createCtx, podName, metav1.GetOptions{})
+			if err != nil {
+				if k8sErrors.IsNotFound(err) {
+					log.Warn("Pod does not exist yet, waiting for it to be created")
+					continue
+				}
+				log.Error("Error while waiting for pod to start running", "err", err)
+				return err
+			}
+
+			switch phase := pod.Status.Phase; phase {
+			case corev1.PodFailed:
+				log.Error("Pod failed, backup may not have succeeded")
+				return fmt.Errorf("Backup pod failed")
+			case corev1.PodSucceeded:
+				log.Info("Backup finished successfully")
+				return nil
+			case corev1.PodRunning:
+				log.Info("Pod has entered running state")
+				break CreateLoop
+
+			default:
+				log.Debug("Pod is not running yet", "phase", string(phase))
+				time.Sleep(s.sleepDuration)
+			}
+		}
+	}
+
+	// Wait for pod to be finished running
+	// This waits longer to give the actual backup time to finish
+	runCtx, runCancel := context.WithTimeout(ctx, s.podWaitTimeout)
+	defer runCancel()
+	for {
+		select {
+		case <-runCtx.Done():
+			log.Error("Timed out waiting for pod to finish running")
+			return fmt.Errorf("Timeout")
+		default:
+			pod, err := s.kubeClient.CoreV1().
+				Pods(s.backupNamespace).
+				Get(createCtx, podName, metav1.GetOptions{})
+			if err != nil {
+				log.Error("Error while waiting for pod to finish running", "err", err)
+				return err
+			}
+
+			switch phase := pod.Status.Phase; phase {
+			case corev1.PodFailed:
+				log.Error("Pod failed, backup may not have succeeded")
+				return fmt.Errorf("Backup pod failed")
+			case corev1.PodSucceeded:
+				log.Info("Backup finished successfully")
+				return nil
+
+			default:
+				log.Debug("Pod is still running", "phase", string(phase))
+				time.Sleep(s.sleepDuration)
+			}
+		}
+	}
+}
+
+func (s *SnapshotClient) DeletePod(ctx context.Context, podName string) error {
+	log := s.log.With("namespace", s.backupNamespace, "podName", podName)
+	err := s.kubeClient.CoreV1().
+		Pods(s.backupNamespace).
+		Delete(ctx, podName, metav1.DeleteOptions{})
+	if err != nil {
+		log.Error("Error deleting pod", "err", err)
+		return err
+	}
+	log.Info("Pod deleted")
 	return nil
 }

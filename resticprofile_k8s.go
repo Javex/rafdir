@@ -24,6 +24,7 @@ type SnapshotClient struct {
 	csiClient       *csiClientset.Clientset
 	snapshotClass   string
 	snapshotDriver  string
+	storageClass    string
 	backupNamespace string
 	sleepDuration   time.Duration
 	waitTimeout     time.Duration
@@ -52,6 +53,7 @@ func NewClient(kubeconfig *string, snapshotClass string, snapshotDriver string, 
 		csiClient:       csiClient,
 		snapshotClass:   snapshotClass,
 		snapshotDriver:  snapshotDriver,
+		storageClass:    "resticprofile-kubernetes",
 		backupNamespace: backupNamespace,
 		sleepDuration:   sleepDuration,
 		waitTimeout:     waitTimeout,
@@ -502,6 +504,7 @@ func (s *SnapshotClient) PVCFromSnapshot(ctx context.Context, snapshotName strin
 			AccessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteOnce,
 			},
+			StorageClassName: &s.storageClass,
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: storageQuant,
@@ -635,7 +638,7 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, podName string, ba
 							ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "restic-secrets-99h2kd82b9",
+										Name: "resticprofile-kubernetes",
 									},
 									Key:      "backblaze-key-id",
 									Optional: &optional,
@@ -647,7 +650,7 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, podName string, ba
 							ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "restic-secrets-99h2kd82b9",
+										Name: "resticprofile-kubernetes",
 									},
 									Key:      "backblaze-application-key",
 									Optional: &optional,
@@ -659,7 +662,7 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, podName string, ba
 							ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "restic-secrets-99h2kd82b9",
+										Name: "resticprofile-kubernetes",
 									},
 									Key:      "restic-repo-password",
 									Optional: &optional,
@@ -686,7 +689,7 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, podName string, ba
 					VolumeSource: corev1.VolumeSource{
 						ConfigMap: &corev1.ConfigMapVolumeSource{
 							LocalObjectReference: corev1.LocalObjectReference{
-								Name: "restic-config-6652d487mc",
+								Name: "resticprofile-kubernetes-config",
 							},
 							DefaultMode: &readWriteMode,
 						},
@@ -697,7 +700,7 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, podName string, ba
 					VolumeSource: corev1.VolumeSource{
 						ConfigMap: &corev1.ConfigMapVolumeSource{
 							LocalObjectReference: corev1.LocalObjectReference{
-								Name: "restic-script-4kk5kcg724",
+								Name: "resticprofile-kubernetes-script",
 							},
 							DefaultMode: &readWriteMode,
 						},

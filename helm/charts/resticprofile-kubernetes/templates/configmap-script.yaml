@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    {{- include "resticprofile-kubernetes.labels" . | nindent 4 }}
+  name: {{ include "resticprofile-kubernetes.name" . }}-script
+data:
+  backup.sh: |
+    {{- .Values.backup_script | nindent 4 }}

@@ -791,7 +791,7 @@ CreateLoop:
 		default:
 			pod, err := s.kubeClient.CoreV1().
 				Pods(s.backupNamespace).
-				Get(createCtx, podName, metav1.GetOptions{})
+				Get(runCtx, podName, metav1.GetOptions{})
 			if err != nil {
 				log.Error("Error while waiting for pod to finish running", "err", err)
 				return err

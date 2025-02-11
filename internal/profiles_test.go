@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestProfilesFromYaml(t *testing.T) {
@@ -151,6 +153,74 @@ func TestProfileToTOML(t *testing.T) {
 
 			if toml != tc.expTOML {
 				t.Fatalf("Unexpected difference in TOML: %v", cmp.Diff(toml, tc.expTOML))
+			}
+		})
+	}
+}
+
+func TestProfilesToConfigMap(t *testing.T) {
+	tcs := []struct {
+		name            string
+		profile         internal.Profile
+		repo            internal.ResticRepository
+		configMapName   string
+		backupNamespace string
+		expConfigMap    corev1.ConfigMap
+	}{
+		{
+			name: "default",
+			profile: internal.Profile{
+				Name:       "testName",
+				Namespace:  "testNamespace",
+				Deployment: "testDeployment",
+				Host:       "test.example.com",
+				Folders:    []string{"/test/folder", "/test/folder2"},
+			},
+			repo: internal.ResticRepository{
+				Name:   "testRepo",
+				Suffix: "-testSuffix",
+			},
+			configMapName:   "testConfigMap",
+			backupNamespace: "testBackupNamespace",
+			expConfigMap: corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testConfigMap",
+					Namespace: "testBackupNamespace",
+				},
+				Data: map[string]string{
+					"testName-testSuffix.toml": `
+[testName-testSuffix]
+  inherit = "testRepo"
+  [testName-testSuffix.backup]
+    tag = ["testName"]
+    source = [
+    "/test/folder",
+    "/test/folder2",
+    ]
+    host = "test.example.com"
+  [testName-testSuffix.snapshots]
+    tag = ["testName"]
+    host = "test.example.com"
+`,
+				},
+			},
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			cm, err := internal.ProfilesToConfigMap(
+				map[string]internal.Profile{"test": tc.profile},
+				[]internal.ResticRepository{tc.repo},
+				tc.backupNamespace,
+				tc.configMapName,
+			)
+			if err != nil {
+				t.Fatalf("Error generating ConfigMap: %v", err)
+			}
+
+			if !cmp.Equal(*cm, tc.expConfigMap) {
+				t.Fatalf("Unexpected difference in ConfigMap: %v", cmp.Diff(*cm, tc.expConfigMap))
 			}
 		})
 	}

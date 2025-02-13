@@ -139,6 +139,12 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 		}
 		profileConfigMap.Data["profiles.yaml"] = baseProfile
 
+		err = s.CreateConfigMap(ctx, profileConfigMap)
+		if err != nil {
+			return fmt.Errorf("Failed to CreateConfigMap: %s", err)
+		}
+		defer s.DeleteConfigMap(ctx, profileConfigMap.Name)
+
 		err = s.CreateBackupPod(ctx, profileConfigMap, podName, backupPVCName)
 		if err != nil {
 			return fmt.Errorf("Failed to CreateBackupPod: %s", err)
@@ -576,6 +582,32 @@ func (s *SnapshotClient) DeletePVC(ctx context.Context, pvcName string) error {
 		log.Error("Error deleting PV", "pvName", pvName)
 	}
 	log.Info("Deleted PV", "pvName", pvName)
+	return nil
+}
+
+func (s *SnapshotClient) CreateConfigMap(ctx context.Context, configMap *corev1.ConfigMap) error {
+	log := s.log.With("namespace", s.config.BackupNamespace, "configMap", configMap.Name)
+	_, err := s.kubeClient.CoreV1().
+		ConfigMaps(s.config.BackupNamespace).
+		Create(ctx, configMap, metav1.CreateOptions{})
+	if err != nil {
+		log.Error("Error creating ConfigMap", "err", err)
+		return err
+	}
+	log.Info("Created ConfigMap")
+	return nil
+}
+
+func (s *SnapshotClient) DeleteConfigMap(ctx context.Context, configMapName string) error {
+	log := s.log.With("namespace", s.config.BackupNamespace, "configMap", configMapName)
+	err := s.kubeClient.CoreV1().
+		ConfigMaps(s.config.BackupNamespace).
+		Delete(ctx, configMapName, metav1.DeleteOptions{})
+	if err != nil {
+		log.Error("Error deleting ConfigMap", "err", err)
+		return err
+	}
+	log.Info("Deleted ConfigMap")
 	return nil
 }
 

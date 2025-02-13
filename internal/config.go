@@ -1,9 +1,11 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"text/template"
 	"time"
 
@@ -68,4 +70,37 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 		Profiles:     profiles,
 		Repositories: repositories,
 	}, nil
+}
+
+func nindent(n int, s string) string {
+	return strings.ReplaceAll(s, "\n", "\n"+strings.Repeat(" ", n))
+}
+
+func trim(s string) string {
+	return strings.TrimSpace(s)
+}
+
+var baseProfileTemplate = template.Must(
+	template.
+		New("baseProfile").
+		Funcs(template.FuncMap{
+			"nindent": nindent,
+			"trim":    trim,
+		}).
+		Parse(`{{ .GlobalConfigFile | trim }}
+{{ range .Repositories }}
+{{- .Name }}:
+  {{- .ProfileYaml | nindent 2 }}
+{{- end }}
+`))
+
+// BaseProfile returns the contents of the base profile that gets written to
+// /etc/restic/profiles.yaml
+func (c *Config) BaseProfile() (string, error) {
+	templateBuffer := new(bytes.Buffer)
+	err := baseProfileTemplate.Execute(templateBuffer, c)
+	if err != nil {
+		return "", fmt.Errorf("Failed to execute base profile template: %w", err)
+	}
+	return templateBuffer.String(), nil
 }

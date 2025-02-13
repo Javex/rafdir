@@ -49,6 +49,11 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 	profiles := config.Profiles
 	repos := config.Repositories
 
+	baseProfile, err := s.config.BaseProfile()
+	if err != nil {
+		return fmt.Errorf("Failed to render base profile: %s", err)
+	}
+
 	for _, profile := range profiles {
 
 		namespace := profile.Namespace
@@ -132,6 +137,7 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("Failed to ToConfigMap: %s", err)
 		}
+		profileConfigMap.Data["profiles.yaml"] = baseProfile
 
 		err = s.CreateBackupPod(ctx, profileConfigMap, podName, backupPVCName)
 		if err != nil {
@@ -711,9 +717,15 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *
 
 	// Mount all profile's ConfigMap in the container
 	for profilePath := range profileConfigMap.Data {
+		var mountPath string
+		if profilePath == "profiles.yaml" {
+			mountPath = "/etc/restic/profiles.yaml"
+		} else {
+			mountPath = fmt.Sprintf("/etc/restic/profiles.d/%s", profilePath)
+		}
 		pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
+			MountPath: mountPath,
 			Name:      profileConfigMap.Name,
-			MountPath: fmt.Sprintf("/etc/restic/profiles.d/%s", profilePath),
 			SubPath:   profilePath,
 			ReadOnly:  true,
 		})

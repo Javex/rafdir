@@ -27,9 +27,15 @@ default_configuration:
 				Repositories: []internal.Repository{
 					{
 						Name: "firstRepo",
-						ProfileYaml: `
-inherit: default_configuration
+						ProfileYaml: `inherit: default_configuration
 repository: someS3Url`,
+					},
+					{
+						Name: "secondRepo",
+						ProfileYaml: `inherit: default_configuration
+repository: someOtherS3Url
+backup:
+  limit-upload: "123"`,
 					},
 				},
 			},
@@ -43,6 +49,11 @@ default_configuration:
 firstRepo:
   inherit: default_configuration
   repository: someS3Url
+secondRepo:
+  inherit: default_configuration
+  repository: someOtherS3Url
+  backup:
+    limit-upload: "123"
 `,
 		},
 	}

@@ -96,8 +96,8 @@ var baseProfileTemplate = template.Must(
 		Parse(`{{ .GlobalConfigFile | trim }}
 {{ range .Repositories }}
 {{- .Name }}:
-  {{- .ProfileYaml | nindent 2 }}
-{{- end }}
+  {{ .ProfileYaml | nindent 2 }}
+{{ end -}}
 `))
 
 // BaseProfile returns the contents of the base profile that gets written to

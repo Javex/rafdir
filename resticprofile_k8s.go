@@ -67,8 +67,8 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 		snapshotContentName := fmt.Sprintf("%s-snapcontent-%s", pvcName, runSuffix)
 		backupPVCName := fmt.Sprintf("%s-backup-%s", pvcName, runSuffix)
 		storageSize := target.Pvc.Spec.Resources.Requests[corev1.ResourceStorage]
-		podName := fmt.Sprintf("%s-%s-%s", profile.Name(), target.PodName, runSuffix)
-		configMapName := fmt.Sprintf("%s-%s", profile.Name(), runSuffix)
+		podName := fmt.Sprintf("%s-%s-%s", profile.Name, target.PodName, runSuffix)
+		configMapName := fmt.Sprintf("%s-%s", profile.Name, runSuffix)
 
 		// oldReplicas, err := s.ScaleTo(ctx, namespace, name, 0)
 		// if err != nil {

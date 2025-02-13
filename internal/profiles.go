@@ -34,7 +34,7 @@ type Profile struct {
 	Host       string   `json:"host"`
 	Folders    []string `json:"folders"`
 
-	name string
+	Name string
 }
 
 func ProfilesFromGlobalConfigMap(globalConfigMap *corev1.ConfigMap) (map[string]Profile, error) {
@@ -65,7 +65,7 @@ func ProfilesFromYamlString(profilesString string) (map[string]Profile, error) {
 
 	for profileName := range profiles {
 		profile := profiles[profileName]
-		profile.name = profileName
+		profile.Name = profileName
 		profiles[profileName] = profile
 
 		if len(profile.Folders) == 0 {
@@ -74,10 +74,6 @@ func ProfilesFromYamlString(profilesString string) (map[string]Profile, error) {
 	}
 
 	return profiles, nil
-}
-
-func (p Profile) Name() string {
-	return p.name
 }
 
 func (p Profile) ToTOML(repoName RepositoryName) (string, error) {
@@ -91,7 +87,7 @@ func (p Profile) ToTOML(repoName RepositoryName) (string, error) {
 	}{
 		Name:    p.fullProfileName(repoName),
 		Inherit: repoName,
-		Tag:     p.name,
+		Tag:     p.Name,
 		Folders: p.Folders,
 		Host:    p.Host,
 	}
@@ -100,7 +96,7 @@ func (p Profile) ToTOML(repoName RepositoryName) (string, error) {
 }
 
 func (p Profile) fullProfileName(repoName RepositoryName) string {
-	return fmt.Sprintf("%s-%s", p.name, repoName)
+	return fmt.Sprintf("%s-%s", p.Name, repoName)
 }
 
 func (p Profile) ToConfigMap(repos []Repository, backupNamespace string, cmName string) (*corev1.ConfigMap, error) {

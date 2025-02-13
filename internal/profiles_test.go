@@ -29,7 +29,7 @@ func TestProfilesFromYaml(t *testing.T) {
 
 			map[string]internal.Profile{
 				"test": {
-					Name:       "testName",
+					Name:       "test",
 					Namespace:  "testNamespace",
 					Deployment: "testDeployment",
 					Stop:       false,
@@ -53,7 +53,7 @@ func TestProfilesFromYaml(t *testing.T) {
 
 			map[string]internal.Profile{
 				"test": {
-					Name:       "testName",
+					Name:       "test",
 					Namespace:  "testNamespace",
 					Deployment: "testDeployment",
 					Stop:       true,
@@ -111,7 +111,7 @@ func TestProfileToTOML(t *testing.T) {
 	tcs := []struct {
 		name    string
 		profile internal.Profile
-		repo    internal.ResticRepository
+		repo    internal.Repository
 		expTOML string
 	}{
 		{
@@ -123,21 +123,20 @@ func TestProfileToTOML(t *testing.T) {
 				Host:       "test.example.com",
 				Folders:    []string{"/test/folder", "/test/folder2"},
 			},
-			repo: internal.ResticRepository{
-				Name:   "testRepo",
-				Suffix: "-testSuffix",
+			repo: internal.Repository{
+				Name: "testRepo",
 			},
 			expTOML: `
-[testName-testSuffix]
+[testName-testRepo]
   inherit = "testRepo"
-  [testName-testSuffix.backup]
+  [testName-testRepo.backup]
     tag = ["testName"]
     source = [
     "/test/folder",
     "/test/folder2",
     ]
     host = "test.example.com"
-  [testName-testSuffix.snapshots]
+  [testName-testRepo.snapshots]
     tag = ["testName"]
     host = "test.example.com"
 `,
@@ -146,7 +145,7 @@ func TestProfileToTOML(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			toml, err := tc.profile.ToTOML(tc.repo)
+			toml, err := tc.profile.ToTOML(tc.repo.Name)
 			if err != nil {
 				t.Fatalf("Error generating TOML: %v", err)
 			}
@@ -162,7 +161,7 @@ func TestProfilesToConfigMap(t *testing.T) {
 	tcs := []struct {
 		name            string
 		profile         internal.Profile
-		repo            internal.ResticRepository
+		repo            internal.Repository
 		configMapName   string
 		backupNamespace string
 		expConfigMap    corev1.ConfigMap
@@ -176,9 +175,8 @@ func TestProfilesToConfigMap(t *testing.T) {
 				Host:       "test.example.com",
 				Folders:    []string{"/test/folder", "/test/folder2"},
 			},
-			repo: internal.ResticRepository{
-				Name:   "testRepo",
-				Suffix: "-testSuffix",
+			repo: internal.Repository{
+				Name: "testRepo",
 			},
 			configMapName:   "testConfigMap",
 			backupNamespace: "testBackupNamespace",
@@ -188,17 +186,17 @@ func TestProfilesToConfigMap(t *testing.T) {
 					Namespace: "testBackupNamespace",
 				},
 				Data: map[string]string{
-					"testName-testSuffix.toml": `
-[testName-testSuffix]
+					"testName-testRepo.toml": `
+[testName-testRepo]
   inherit = "testRepo"
-  [testName-testSuffix.backup]
+  [testName-testRepo.backup]
     tag = ["testName"]
     source = [
     "/test/folder",
     "/test/folder2",
     ]
     host = "test.example.com"
-  [testName-testSuffix.snapshots]
+  [testName-testRepo.snapshots]
     tag = ["testName"]
     host = "test.example.com"
 `,
@@ -211,7 +209,7 @@ func TestProfilesToConfigMap(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cm, err := internal.ProfilesToConfigMap(
 				map[string]internal.Profile{"test": tc.profile},
-				[]internal.ResticRepository{tc.repo},
+				[]internal.Repository{tc.repo},
 				tc.backupNamespace,
 				tc.configMapName,
 			)

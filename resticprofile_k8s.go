@@ -492,7 +492,7 @@ func (s *SnapshotClient) PVCFromSnapshot(ctx context.Context, snapshotName strin
 			AccessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteOnce,
 			},
-			StorageClassName: &s.config.SnapshotClass,
+			StorageClassName: &s.config.StorageClass,
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: storageSize,

@@ -15,10 +15,15 @@ import (
 )
 
 type Config struct {
-	GlobalConfigFile   string
-	SnapshotClass      string
-	SnapshotDriver     string
-	BackupNamespace    string
+	GlobalConfigFile string
+	SnapshotClass    string
+	SnapshotDriver   string
+	BackupNamespace  string
+	// StorageClass is used for the temporary backup PVC which is different from
+	// the default one. It should still be the same underlying provisioner/driver
+	// but, it can have different parameters. For example, it might not have any
+	// replication (replicas=1) because it's a temporary backup PVC.
+	StorageClass       string
 	SleepDuration      time.Duration
 	WaitTimeout        time.Duration
 	PodCreationTimeout time.Duration
@@ -61,6 +66,7 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 		SnapshotClass:      "longhorn",
 		SnapshotDriver:     "driver.longhorn.io",
 		BackupNamespace:    backupNamespace,
+		StorageClass:       "resticprofile-kubernetes",
 		SleepDuration:      1 * time.Second,
 		WaitTimeout:        10 * time.Second,
 		PodCreationTimeout: 1 * time.Minute,

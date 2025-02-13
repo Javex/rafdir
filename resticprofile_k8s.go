@@ -646,7 +646,6 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *
 					Args:    []string{"/usr/local/bin/backup.sh"},
 					VolumeMounts: []corev1.VolumeMount{
 						{Name: "storage", MountPath: "/var/lib/grafana"},
-						{Name: "restic-cfg", MountPath: "/etc/restic", ReadOnly: true},
 						{Name: "restic-script", MountPath: "/usr/local/bin"},
 						{Name: "restic-cache", MountPath: "/var/cache/restic"},
 						{Name: "nfs-restic-repo", MountPath: "/mnt/kubernetes-restic"},
@@ -701,17 +700,6 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 							ClaimName: backupPVCName,
-						},
-					},
-				},
-				{
-					Name: "restic-cfg",
-					VolumeSource: corev1.VolumeSource{
-						ConfigMap: &corev1.ConfigMapVolumeSource{
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: "resticprofile-kubernetes-config",
-							},
-							DefaultMode: &readWriteMode,
 						},
 					},
 				},

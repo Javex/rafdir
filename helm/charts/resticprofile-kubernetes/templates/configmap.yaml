@@ -6,7 +6,10 @@ metadata:
   name: {{ include "resticprofile-kubernetes.name" . }}-config
 data:
   profiles.yaml: |
-    {{- index .Values "profiles.yaml" | nindent 4 }}
+    {{- index .Values.configuration | nindent 4 }}
+
+  repositories: |
+    {{- .Values.repositories | toYaml | nindent 4 }}
 
   profiles: |
     {{- .Values.profiles | toYaml | nindent 4 }}

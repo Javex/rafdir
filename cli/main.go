@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"log/slog"
@@ -20,11 +21,13 @@ func main() {
 	backupNamespace := "backup"
 	sleepDuration := 1 * time.Second
 	waitTimeout := 10 * time.Second
-	client, err := resticprofilek8s.NewClient(kubeconfig, snapshotClass, snapshotDriver, backupNamespace, sleepDuration, waitTimeout)
+	configMapName := "resticprofile-kubernetes-config"
+	ctx := context.Background()
+	client, err := resticprofilek8s.NewClient(kubeconfig, snapshotClass, snapshotDriver, backupNamespace, sleepDuration, waitTimeout, configMapName)
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = client.TakeBackup()
+	err = client.TakeBackup(ctx)
 	if err != nil {
 		log.Fatalf("Error taking backup: %s", err)
 	}

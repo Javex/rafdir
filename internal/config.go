@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"text/template"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -23,7 +24,7 @@ type Config struct {
 	Image              string
 
 	Profiles     map[string]Profile
-	Repositories []RepositoryName
+	Repositories []Repository
 }
 
 func LoadConfigFromKubernetes(ctx context.Context, log *slog.Logger, kubeClient kubernetes.Interface, namespace string, configMapName string) (*Config, error) {

@@ -103,7 +103,7 @@ func (p Profile) fullProfileName(repoName RepositoryName) string {
 	return fmt.Sprintf("%s%s", p.name, repoName)
 }
 
-func (p Profile) ToConfigMap(repos []RepositoryName, backupNamespace string, cmName string) (*corev1.ConfigMap, error) {
+func (p Profile) ToConfigMap(repos []Repository, backupNamespace string, cmName string) (*corev1.ConfigMap, error) {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cmName,
@@ -113,17 +113,17 @@ func (p Profile) ToConfigMap(repos []RepositoryName, backupNamespace string, cmN
 	}
 
 	for _, repoName := range repos {
-		tomlString, err := p.ToTOML(repoName)
+		tomlString, err := p.ToTOML(repoName.Name)
 		if err != nil {
 			return nil, err
 		}
-		cm.Data[fmt.Sprintf("%s.toml", p.fullProfileName(repoName))] = tomlString
+		cm.Data[fmt.Sprintf("%s.toml", p.fullProfileName(repoName.Name))] = tomlString
 	}
 
 	return cm, nil
 }
 
-func ProfilesToConfigMap(profiles map[string]Profile, repos []RepositoryName, backupNamespace string, cmName string) (*corev1.ConfigMap, error) {
+func ProfilesToConfigMap(profiles map[string]Profile, repos []Repository, backupNamespace string, cmName string) (*corev1.ConfigMap, error) {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cmName,
@@ -133,7 +133,8 @@ func ProfilesToConfigMap(profiles map[string]Profile, repos []RepositoryName, ba
 	}
 
 	for _, profile := range profiles {
-		for _, repoName := range repos {
+		for _, repo := range repos {
+			repoName := repo.Name
 			tomlString, err := profile.ToTOML(repoName)
 			if err != nil {
 				return nil, err

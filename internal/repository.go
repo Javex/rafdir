@@ -8,8 +8,12 @@ import (
 )
 
 type RepositoryName string
+type Repository struct {
+	Name        RepositoryName
+	ProfileYaml string
+}
 
-func RepositoriesFromConfigMap(configMap *corev1.ConfigMap) ([]RepositoryName, error) {
+func RepositoriesFromConfigMap(configMap *corev1.ConfigMap) ([]Repository, error) {
 	// Get the keys out of the first level of yaml data, ignoring any fields
 	// inside, only getting the key names.
 	repoYaml, ok := configMap.Data["repositories"]
@@ -27,9 +31,17 @@ func RepositoriesFromConfigMap(configMap *corev1.ConfigMap) ([]RepositoryName, e
 		return nil, fmt.Errorf("failed to unmarshal repositories: %v", err)
 	}
 
-	repositories := make([]RepositoryName, 0, len(repoList))
-	for repository := range repoList {
-		repositories = append(repositories, RepositoryName(repository))
+	repositories := make([]Repository, 0, len(repoList))
+	for repoName, repoValue := range repoList {
+		profileYaml, err := yaml.Marshal(repoValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal repo value as string %s: %v", repoName, err)
+		}
+		repo := Repository{
+			Name:        RepositoryName(repoName),
+			ProfileYaml: string(profileYaml),
+		}
+		repositories = append(repositories, repo)
 	}
 
 	return repositories, nil

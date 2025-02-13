@@ -354,7 +354,7 @@ func (s *SnapshotClient) SnapshotContentFromHandle(ctx context.Context, snapshot
 			Name: snapshotContentName,
 		},
 		Spec: volumesnapshot.VolumeSnapshotContentSpec{
-			DeletionPolicy:          volumesnapshot.VolumeSnapshotContentRetain,
+			DeletionPolicy:          volumesnapshot.VolumeSnapshotContentDelete,
 			Driver:                  s.config.SnapshotDriver,
 			VolumeSnapshotClassName: &s.config.SnapshotClass,
 			Source: volumesnapshot.VolumeSnapshotContentSource{

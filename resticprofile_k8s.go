@@ -93,18 +93,9 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 		return fmt.Errorf("Failed to load global configmap: %s", err)
 	}
 	log.Info("Loaded global configmap")
-
-	profiles, err := internal.ProfilesFromGlobalConfigMap(s.globalConfigMap)
-	if err != nil {
-		return err
-	}
-	log.Info("Loaded profiles")
-
-	repos, err := internal.RepositoriesFromConfigMap(s.globalConfigMap)
-	if err != nil {
-		return err
-	}
-	log.Info("Loaded repositories")
+	config, err := internal.NewConfigFromConfigMap(log, s.globalConfigMap)
+	profiles := config.Profiles
+	repos := config.Repositories
 
 	for _, profile := range profiles {
 

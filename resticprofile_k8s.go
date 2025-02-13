@@ -150,7 +150,7 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 			return fmt.Errorf("Failed to CreateBackupPod: %s", err)
 		}
 		s.WaitPod(ctx, podName)
-		// defer s.DeletePod(ctx, podName)
+		defer s.DeletePod(ctx, podName)
 
 	}
 	return nil

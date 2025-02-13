@@ -100,7 +100,7 @@ func (p Profile) ToTOML(repoName RepositoryName) (string, error) {
 }
 
 func (p Profile) fullProfileName(repoName RepositoryName) string {
-	return fmt.Sprintf("%s%s", p.name, repoName)
+	return fmt.Sprintf("%s-%s", p.name, repoName)
 }
 
 func (p Profile) ToConfigMap(repos []Repository, backupNamespace string, cmName string) (*corev1.ConfigMap, error) {

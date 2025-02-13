@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"resticprofilek8s"
-	"time"
+	"resticprofilek8s/internal"
 
 	"k8s.io/client-go/util/homedir"
 )
@@ -16,20 +16,33 @@ import (
 func main() {
 	initLogging()
 	kubeconfig := getKubeconfig()
-	snapshotClass := "longhorn"
-	snapshotDriver := "driver.longhorn.io"
-	backupNamespace := "backup"
-	sleepDuration := 1 * time.Second
-	waitTimeout := 10 * time.Second
+	namespace := "backup"
 	configMapName := "resticprofile-kubernetes-config"
 	ctx := context.Background()
-	client, err := resticprofilek8s.NewClient(kubeconfig, snapshotClass, snapshotDriver, backupNamespace, sleepDuration, waitTimeout, configMapName)
+	kubeClient, err := resticprofilek8s.InitK8sClient(kubeconfig)
 	if err != nil {
-		log.Fatal(err)
+		panic(fmt.Errorf("Failed to create k8s client: %s", err))
+	}
+
+	csiClient, err := resticprofilek8s.InitCSIClient(kubeconfig)
+	if err != nil {
+		panic(fmt.Errorf("Failed to create csi client: %s", err))
+	}
+
+	log := slog.Default()
+
+	config, err := internal.LoadConfigFromKubernetes(ctx, log, kubeClient, namespace, configMapName)
+	if err != nil {
+		panic(fmt.Errorf("Failed to load global configmap: %s", err))
+	}
+
+	client, err := resticprofilek8s.NewClient(log, kubeClient, csiClient, config)
+	if err != nil {
+		panic(fmt.Errorf("Failed to create client: %s", err))
 	}
 	err = client.TakeBackup(ctx)
 	if err != nil {
-		log.Fatalf("Error taking backup: %s", err)
+		panic(fmt.Errorf("Error taking backup: %s", err))
 	}
 }
 

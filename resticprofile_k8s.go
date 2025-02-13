@@ -21,63 +21,21 @@ import (
 )
 
 type SnapshotClient struct {
-	kubeClient          *kubernetes.Clientset
-	csiClient           *csiClientset.Clientset
-	snapshotClass       string
-	snapshotDriver      string
-	storageClass        string
-	backupNamespace     string
-	sleepDuration       time.Duration
-	waitTimeout         time.Duration
-	podWaitTimeout      time.Duration
-	podCreateWait       time.Duration
-	globalConfigMapName string
-	globalConfigMap     *corev1.ConfigMap
-
-	image   string
-	command []string
-
-	log *slog.Logger
+	kubeClient kubernetes.Interface
+	csiClient  csiClientset.Interface
+	config     *internal.Config
+	log        *slog.Logger
 }
 
-func NewClient(kubeconfig *string, snapshotClass string, snapshotDriver string, backupNamespace string, sleepDuration time.Duration, waitTimeout time.Duration, configMapName string) (*SnapshotClient, error) {
-	k8sClient, err := initK8sClient(kubeconfig)
-	if err != nil {
-		return nil, err
-	}
-
-	csiClient, err := initCSIClient(kubeconfig)
-	if err != nil {
-		return nil, err
-	}
+func NewClient(log *slog.Logger, kubeClient kubernetes.Interface, csiClient csiClientset.Interface, config *internal.Config) (*SnapshotClient, error) {
 
 	client := SnapshotClient{
-		kubeClient:          k8sClient,
-		csiClient:           csiClient,
-		snapshotClass:       snapshotClass,
-		snapshotDriver:      snapshotDriver,
-		storageClass:        "resticprofile-kubernetes",
-		backupNamespace:     backupNamespace,
-		sleepDuration:       sleepDuration,
-		waitTimeout:         waitTimeout,
-		podCreateWait:       1 * time.Minute,
-		podWaitTimeout:      5 * time.Minute,
-		globalConfigMapName: configMapName,
-
-		image: "ghcr.io/javex/resticprofile-kubernetes:0.29.0",
-
-		log: slog.Default(),
+		kubeClient: kubeClient,
+		csiClient:  csiClient,
+		config:     config,
+		log:        log,
 	}
 	return &client, nil
-}
-
-func (s *SnapshotClient) loadGlobalConfigMap(ctx context.Context, configMapName string) error {
-	cm, err := s.kubeClient.CoreV1().ConfigMaps(s.backupNamespace).Get(ctx, configMapName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("Failed to get global configmap %s: %w", configMapName, err)
-	}
-	s.globalConfigMap = cm
-	return nil
 }
 
 func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
@@ -87,13 +45,7 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 	// will be skipped to create an idempotent run. Resources will be deleted
 	// when they are no longer needed.
 	runSuffix := "testing"
-
-	err := s.loadGlobalConfigMap(ctx, s.globalConfigMapName)
-	if err != nil {
-		return fmt.Errorf("Failed to load global configmap: %s", err)
-	}
-	log.Info("Loaded global configmap")
-	config, err := internal.NewConfigFromConfigMap(log, s.globalConfigMap)
+	config := s.config
 	profiles := config.Profiles
 	repos := config.Repositories
 
@@ -163,7 +115,7 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("Failed to SnapshotFromContent: %s", err)
 		}
-		defer s.DeleteSnapshot(ctx, s.backupNamespace, snapshotName)
+		defer s.DeleteSnapshot(ctx, s.config.BackupNamespace, snapshotName)
 
 		err = s.WaitSnapshotReady(ctx, &snapshotName)
 		if err != nil {
@@ -176,7 +128,7 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 		}
 		defer s.DeletePVC(ctx, backupPVCName)
 
-		profileConfigMap, err := profile.ToConfigMap(repos, s.backupNamespace, configMapName)
+		profileConfigMap, err := profile.ToConfigMap(repos, s.config.BackupNamespace, configMapName)
 		if err != nil {
 			return fmt.Errorf("Failed to ToConfigMap: %s", err)
 		}
@@ -202,7 +154,7 @@ func getK8sConfig(kubeconfig *string) (*rest.Config, error) {
 	return config, err
 }
 
-func initK8sClient(kubeconfig *string) (*kubernetes.Clientset, error) {
+func InitK8sClient(kubeconfig *string) (*kubernetes.Clientset, error) {
 	config, err := getK8sConfig(kubeconfig)
 	if err != nil {
 		return nil, err
@@ -216,7 +168,7 @@ func initK8sClient(kubeconfig *string) (*kubernetes.Clientset, error) {
 	return clientset, nil
 }
 
-func initCSIClient(kubeconfig *string) (*csiClientset.Clientset, error) {
+func InitCSIClient(kubeconfig *string) (*csiClientset.Clientset, error) {
 	config, err := getK8sConfig(kubeconfig)
 	if err != nil {
 		return nil, err
@@ -257,7 +209,7 @@ func (s *SnapshotClient) ScaleTo(ctx context.Context, namespace string, deployme
 
 func (s *SnapshotClient) WaitStopped(ctx context.Context, namespace string, selector string) error {
 	log := s.log.With("namespace", namespace, "selector", selector)
-	ctx, cancel := context.WithTimeout(ctx, s.waitTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.config.WaitTimeout)
 	defer cancel()
 	for {
 		select {
@@ -280,7 +232,7 @@ func (s *SnapshotClient) WaitStopped(ctx context.Context, namespace string, sele
 			}
 
 			log.Debug("Waiting for pods to stop", "podCount", len(pods.Items))
-			time.Sleep(s.sleepDuration)
+			time.Sleep(s.config.SleepDuration)
 
 		}
 	}
@@ -306,7 +258,7 @@ func (s *SnapshotClient) TakeSnapshot(ctx context.Context, namespace string, sna
 			Namespace: namespace,
 		},
 		Spec: volumesnapshot.VolumeSnapshotSpec{
-			VolumeSnapshotClassName: &s.snapshotClass,
+			VolumeSnapshotClassName: &s.config.SnapshotClass,
 			Source: volumesnapshot.VolumeSnapshotSource{
 				PersistentVolumeClaimName: &pvcName,
 			},
@@ -326,23 +278,23 @@ func (s *SnapshotClient) TakeSnapshot(ctx context.Context, namespace string, sna
 
 func (s *SnapshotClient) SnapshotFromContent(ctx context.Context, snapshotName string, contentName *string) error {
 	_, err := s.csiClient.SnapshotV1().
-		VolumeSnapshots(s.backupNamespace).
+		VolumeSnapshots(s.config.BackupNamespace).
 		Get(ctx, snapshotName, metav1.GetOptions{})
 
 	if err == nil {
-		s.log.Info("Snapshot already exists, not creating new one", "namespace", s.backupNamespace, "snapshotName", snapshotName)
+		s.log.Info("Snapshot already exists, not creating new one", "namespace", s.config.BackupNamespace, "snapshotName", snapshotName)
 		return nil
 	}
 
 	if !k8sErrors.IsNotFound(err) {
-		s.log.Error("Unexpected error when checking for existing snapshot", "err", err, "namespace", s.backupNamespace, "snapshotName", snapshotName)
+		s.log.Error("Unexpected error when checking for existing snapshot", "err", err, "namespace", s.config.BackupNamespace, "snapshotName", snapshotName)
 		return fmt.Errorf("Error when checking for existing snapshot: %w", err)
 	}
 
 	snapshot := volumesnapshot.VolumeSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      snapshotName,
-			Namespace: s.backupNamespace,
+			Namespace: s.config.BackupNamespace,
 		},
 		Spec: volumesnapshot.VolumeSnapshotSpec{
 			Source: volumesnapshot.VolumeSnapshotSource{
@@ -351,10 +303,10 @@ func (s *SnapshotClient) SnapshotFromContent(ctx context.Context, snapshotName s
 		},
 	}
 	_, err = s.csiClient.SnapshotV1().
-		VolumeSnapshots(s.backupNamespace).
+		VolumeSnapshots(s.config.BackupNamespace).
 		Create(ctx, &snapshot, metav1.CreateOptions{})
 
-	s.log.Info("Created Snapshot from content", "namespace", s.backupNamespace, "snapshotName", snapshotName, "contentName", contentName)
+	s.log.Info("Created Snapshot from content", "namespace", s.config.BackupNamespace, "snapshotName", snapshotName, "contentName", contentName)
 
 	return err
 }
@@ -391,14 +343,14 @@ func (s *SnapshotClient) SnapshotContentFromHandle(ctx context.Context, snapshot
 		},
 		Spec: volumesnapshot.VolumeSnapshotContentSpec{
 			DeletionPolicy:          volumesnapshot.VolumeSnapshotContentRetain,
-			Driver:                  s.snapshotDriver,
-			VolumeSnapshotClassName: &s.snapshotClass,
+			Driver:                  s.config.SnapshotDriver,
+			VolumeSnapshotClassName: &s.config.SnapshotClass,
 			Source: volumesnapshot.VolumeSnapshotContentSource{
 				SnapshotHandle: &snapshotContentHandle,
 			},
 			VolumeSnapshotRef: corev1.ObjectReference{
 				Name:      snapshotName,
-				Namespace: s.backupNamespace,
+				Namespace: s.config.BackupNamespace,
 			},
 		},
 	}
@@ -415,7 +367,7 @@ func (s *SnapshotClient) SnapshotContentFromHandle(ctx context.Context, snapshot
 }
 
 func (s *SnapshotClient) WaitSnapContent(ctx context.Context, snapshot *volumesnapshot.VolumeSnapshot) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, s.waitTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.config.WaitTimeout)
 	defer cancel()
 	namespace := snapshot.ObjectMeta.Namespace
 	snapshotName := snapshot.ObjectMeta.Name
@@ -440,7 +392,7 @@ func (s *SnapshotClient) WaitSnapContent(ctx context.Context, snapshot *volumesn
 				return *snapshot.Status.BoundVolumeSnapshotContentName, nil
 			}
 
-			time.Sleep(s.sleepDuration)
+			time.Sleep(s.config.SleepDuration)
 
 		}
 	}
@@ -473,12 +425,12 @@ func (s *SnapshotClient) SnapshotHandleFromContent(ctx context.Context, contentN
 		}
 
 		s.log.Debug("SnapshotHandle is not ready yet", "contentName", contentName)
-		time.Sleep(s.sleepDuration)
+		time.Sleep(s.config.SleepDuration)
 	}
 }
 
 func (s *SnapshotClient) WaitSnapshotReady(ctx context.Context, snapshotName *string) error {
-	ctx, cancel := context.WithTimeout(ctx, s.waitTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.config.WaitTimeout)
 	defer cancel()
 	for {
 		select {
@@ -488,30 +440,30 @@ func (s *SnapshotClient) WaitSnapshotReady(ctx context.Context, snapshotName *st
 
 		default:
 			snapshot, err := s.csiClient.SnapshotV1().
-				VolumeSnapshots(s.backupNamespace).
+				VolumeSnapshots(s.config.BackupNamespace).
 				Get(ctx, *snapshotName, metav1.GetOptions{})
 
 			if err != nil {
-				s.log.Error("Error when waiting for snapshot to be ready", "namespace", s.backupNamespace, "snapshotName", snapshotName, "err", err)
+				s.log.Error("Error when waiting for snapshot to be ready", "namespace", s.config.BackupNamespace, "snapshotName", snapshotName, "err", err)
 				return fmt.Errorf("Error waiting for snapshot to be ready: %w", err)
 			}
 
 			if snapshot.Status != nil && snapshot.Status.ReadyToUse != nil && *snapshot.Status.ReadyToUse {
-				s.log.Info("Snapshot is ready to use", "namespace", s.backupNamespace, "snapshotName", *snapshotName)
+				s.log.Info("Snapshot is ready to use", "namespace", s.config.BackupNamespace, "snapshotName", *snapshotName)
 				return nil
 			}
 
-			s.log.Debug("Snapshot is not ready yet", "namespace", s.backupNamespace, "snapshotName", *snapshotName)
-			time.Sleep(s.sleepDuration)
+			s.log.Debug("Snapshot is not ready yet", "namespace", s.config.BackupNamespace, "snapshotName", *snapshotName)
+			time.Sleep(s.config.SleepDuration)
 		}
 	}
 }
 
 func (s *SnapshotClient) PVCFromSnapshot(ctx context.Context, snapshotName string, pvcName string, storageSize resource.Quantity) error {
-	log := s.log.With("namespace", s.backupNamespace, "pvcName", pvcName)
+	log := s.log.With("namespace", s.config.BackupNamespace, "pvcName", pvcName)
 	// Check if PVC already exists
 	_, err := s.kubeClient.CoreV1().
-		PersistentVolumeClaims(s.backupNamespace).
+		PersistentVolumeClaims(s.config.BackupNamespace).
 		Get(ctx, pvcName, metav1.GetOptions{})
 	if err == nil {
 		log.Info("PVC already exists, not creating new one")
@@ -523,7 +475,7 @@ func (s *SnapshotClient) PVCFromSnapshot(ctx context.Context, snapshotName strin
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pvcName,
-			Namespace: s.backupNamespace,
+			Namespace: s.config.BackupNamespace,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			DataSource: &corev1.TypedLocalObjectReference{
@@ -534,7 +486,7 @@ func (s *SnapshotClient) PVCFromSnapshot(ctx context.Context, snapshotName strin
 			AccessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteOnce,
 			},
-			StorageClassName: &s.storageClass,
+			StorageClassName: &s.config.SnapshotClass,
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: storageSize,
@@ -544,7 +496,7 @@ func (s *SnapshotClient) PVCFromSnapshot(ctx context.Context, snapshotName strin
 	}
 
 	_, err = s.kubeClient.CoreV1().
-		PersistentVolumeClaims(s.backupNamespace).
+		PersistentVolumeClaims(s.config.BackupNamespace).
 		Create(ctx, pvc, metav1.CreateOptions{})
 	if err != nil {
 		log.Error("Error creating PVC", "snapshotName", snapshotName, "err", err)
@@ -553,7 +505,7 @@ func (s *SnapshotClient) PVCFromSnapshot(ctx context.Context, snapshotName strin
 
 	log.Info("Created new PVC", "snapshotName", snapshotName, "err", err)
 
-	ctx, cancel := context.WithTimeout(ctx, s.waitTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.config.WaitTimeout)
 	defer cancel()
 	for {
 		select {
@@ -563,7 +515,7 @@ func (s *SnapshotClient) PVCFromSnapshot(ctx context.Context, snapshotName strin
 
 		default:
 			pvc, err = s.kubeClient.CoreV1().
-				PersistentVolumeClaims(s.backupNamespace).
+				PersistentVolumeClaims(s.config.BackupNamespace).
 				Get(ctx, pvcName, metav1.GetOptions{})
 			if err != nil {
 				if !k8sErrors.IsNotFound(err) {
@@ -580,16 +532,16 @@ func (s *SnapshotClient) PVCFromSnapshot(ctx context.Context, snapshotName strin
 			}
 
 			log.Debug("Waiting for PVC to be ready")
-			time.Sleep(s.sleepDuration)
+			time.Sleep(s.config.SleepDuration)
 
 		}
 	}
 }
 
 func (s *SnapshotClient) DeletePVC(ctx context.Context, pvcName string) error {
-	log := s.log.With("namespace", s.backupNamespace, "pvcName", pvcName)
+	log := s.log.With("namespace", s.config.BackupNamespace, "pvcName", pvcName)
 	pvc, err := s.kubeClient.CoreV1().
-		PersistentVolumeClaims(s.backupNamespace).
+		PersistentVolumeClaims(s.config.BackupNamespace).
 		Get(ctx, pvcName, metav1.GetOptions{})
 	if err != nil {
 		if k8sErrors.IsNotFound(err) {
@@ -602,7 +554,7 @@ func (s *SnapshotClient) DeletePVC(ctx context.Context, pvcName string) error {
 	pvName := pvc.Spec.VolumeName
 
 	err = s.kubeClient.CoreV1().
-		PersistentVolumeClaims(s.backupNamespace).
+		PersistentVolumeClaims(s.config.BackupNamespace).
 		Delete(ctx, pvcName, metav1.DeleteOptions{})
 	if err != nil {
 		s.log.Error("Error deleting PVC", "err", err)
@@ -622,10 +574,10 @@ func (s *SnapshotClient) DeletePVC(ctx context.Context, pvcName string) error {
 }
 
 func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *corev1.ConfigMap, podName string, backupPVCName string) error {
-	log := s.log.With("namespace", s.backupNamespace, "podName", podName)
+	log := s.log.With("namespace", s.config.BackupNamespace, "podName", podName)
 
 	pod, err := s.kubeClient.CoreV1().
-		Pods(s.backupNamespace).
+		Pods(s.config.BackupNamespace).
 		Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
 		if !k8sErrors.IsNotFound(err) {
@@ -643,7 +595,7 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *
 	pod = &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
-			Namespace: s.backupNamespace,
+			Namespace: s.config.BackupNamespace,
 		},
 		Spec: corev1.PodSpec{
 			ServiceAccountName: "restic",
@@ -651,7 +603,7 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *
 			Containers: []corev1.Container{
 				{
 					Name:    "resticprofile",
-					Image:   s.image,
+					Image:   s.config.Image,
 					Command: []string{"sh"},
 					Args:    []string{"/usr/local/bin/backup.sh"},
 					VolumeMounts: []corev1.VolumeMount{
@@ -780,7 +732,7 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *
 	})
 
 	_, err = s.kubeClient.CoreV1().
-		Pods(s.backupNamespace).
+		Pods(s.config.BackupNamespace).
 		Create(ctx, pod, metav1.CreateOptions{})
 	if err != nil {
 		log.Error("Failed to create pod", "err", err)
@@ -792,11 +744,11 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *
 }
 
 func (s *SnapshotClient) WaitPod(ctx context.Context, podName string) error {
-	log := s.log.With("namespace", s.backupNamespace, "podName", podName)
+	log := s.log.With("namespace", s.config.BackupNamespace, "podName", podName)
 
 	// Wait for ContainerCreating to be finished
 	// Shorter timeout than the entire run to detect issues early
-	createCtx, createCancel := context.WithTimeout(ctx, s.podCreateWait)
+	createCtx, createCancel := context.WithTimeout(ctx, s.config.PodCreationTimeout)
 	defer createCancel()
 CreateLoop:
 	for {
@@ -806,7 +758,7 @@ CreateLoop:
 			return fmt.Errorf("Timeout")
 		default:
 			pod, err := s.kubeClient.CoreV1().
-				Pods(s.backupNamespace).
+				Pods(s.config.BackupNamespace).
 				Get(createCtx, podName, metav1.GetOptions{})
 			if err != nil {
 				if k8sErrors.IsNotFound(err) {
@@ -830,14 +782,14 @@ CreateLoop:
 
 			default:
 				log.Debug("Pod is not running yet", "phase", string(phase))
-				time.Sleep(s.sleepDuration)
+				time.Sleep(s.config.SleepDuration)
 			}
 		}
 	}
 
 	// Wait for pod to be finished running
 	// This waits longer to give the actual backup time to finish
-	runCtx, runCancel := context.WithTimeout(ctx, s.podWaitTimeout)
+	runCtx, runCancel := context.WithTimeout(ctx, s.config.PodWaitTimeout)
 	defer runCancel()
 	for {
 		select {
@@ -846,7 +798,7 @@ CreateLoop:
 			return fmt.Errorf("Timeout")
 		default:
 			pod, err := s.kubeClient.CoreV1().
-				Pods(s.backupNamespace).
+				Pods(s.config.BackupNamespace).
 				Get(runCtx, podName, metav1.GetOptions{})
 			if err != nil {
 				log.Error("Error while waiting for pod to finish running", "err", err)
@@ -863,16 +815,16 @@ CreateLoop:
 
 			default:
 				log.Debug("Pod is still running", "phase", string(phase))
-				time.Sleep(s.sleepDuration)
+				time.Sleep(s.config.SleepDuration)
 			}
 		}
 	}
 }
 
 func (s *SnapshotClient) DeletePod(ctx context.Context, podName string) error {
-	log := s.log.With("namespace", s.backupNamespace, "podName", podName)
+	log := s.log.With("namespace", s.config.BackupNamespace, "podName", podName)
 	err := s.kubeClient.CoreV1().
-		Pods(s.backupNamespace).
+		Pods(s.config.BackupNamespace).
 		Delete(ctx, podName, metav1.DeleteOptions{})
 	if err != nil {
 		log.Error("Error deleting pod", "err", err)

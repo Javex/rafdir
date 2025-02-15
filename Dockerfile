@@ -4,10 +4,11 @@ FROM alpine:latest AS builder
 RUN apk add --no-cache git go
 
 WORKDIR /build
+COPY go.mod go.sum /build/
+RUN go mod download
 COPY internal /build/internal
 COPY cli /build/cli
-COPY go.mod go.sum resticprofile_k8s.go /build/
-
+COPY resticprofile_k8s.go /build/
 RUN go build -o ./cli/resticprofile-kubernetes ./cli/resticprofile-kubernetes.go
 
 FROM alpine:latest

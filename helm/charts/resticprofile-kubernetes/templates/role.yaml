@@ -1,0 +1,41 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "resticprofile-kubernetes.name" . }}
+  labels:
+    {{- include "resticprofile-kubernetes.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - persistentvolumeclaims
+      - configmaps
+    verbs:
+      - get
+      - list
+      - create
+      - delete
+  - apiGroups:
+      - "snapshot.storage.k8s.io"
+    resources:
+      - volumesnapshots
+    verbs:
+      - get
+      - list
+      - create
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "resticprofile-kubernetes.name" . }}
+  labels:
+    {{- include "resticprofile-kubernetes.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "resticprofile-kubernetes.name" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "resticprofile-kubernetes.name" . }}

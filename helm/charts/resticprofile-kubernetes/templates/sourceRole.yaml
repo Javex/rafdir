@@ -1,0 +1,54 @@
+# This file contains a Role & RoleBinding for each namespace that the backup
+# service should access and read PVCs from.
+{{- $root := . }}
+{{- range $profileName, $profile := .Values.profiles }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "resticprofile-kubernetes.name" $root }}-{{ $profileName }}
+  namespace: {{ $profile.namespace }}
+  labels:
+    {{- include "resticprofile-kubernetes.labels" $root | nindent 4 }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - persistentvolumeclaims
+    verbs:
+      - get
+      - list
+  # Read deployments
+  - apiGroups:
+      - "apps"
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - "snapshot.storage.k8s.io"
+    resources:
+      - volumesnapshots
+    verbs:
+      - get
+      - list
+      - create
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "resticprofile-kubernetes.name" $root }}-{{ $profileName }}
+  namespace: {{ $profile.namespace }}
+  labels:
+    {{- include "resticprofile-kubernetes.labels" $root | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "resticprofile-kubernetes.name" $root }}-{{ $profileName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "resticprofile-kubernetes.name" $root }}
+    namespace: {{ $root.Release.Namespace }}
+{{- end }}

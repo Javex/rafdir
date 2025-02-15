@@ -10,13 +10,11 @@ import (
 	// apiv1 "k8s.io/api/core/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	volumesnapshot "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	csiClientset "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned"
 )
 
@@ -62,11 +60,6 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 			return fmt.Errorf("Failed to NewBackupTargetFromDeploymentName: %s", err)
 		}
 
-		pvcName := target.Pvc.Name
-		snapshotName := fmt.Sprintf("%s-snapshot-%s", pvcName, runSuffix)
-		snapshotContentName := fmt.Sprintf("%s-snapcontent-%s", pvcName, runSuffix)
-		backupPVCName := fmt.Sprintf("%s-backup-%s", pvcName, runSuffix)
-		storageSize := target.Pvc.Spec.Resources.Requests[corev1.ResourceStorage]
 		podName := fmt.Sprintf("%s-%s-%s", profile.Name, target.PodName, runSuffix)
 		configMapName := fmt.Sprintf("%s-%s", profile.Name, runSuffix)
 
@@ -93,45 +86,22 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 		// 	return fmt.Errorf("Failed WaitStopped: %s", err)
 		// }
 
-		snapshot, err := s.TakeSnapshot(ctx, namespace, snapshotName, pvcName)
-		if err != nil {
-			return fmt.Errorf("Failed TakeSnapshot: %s", err)
-		}
-		defer s.DeleteSnapshot(ctx, namespace, snapshotName)
+		snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
+			DestNamespace: s.config.BackupNamespace,
+			RunSuffix:     runSuffix,
+			SnapshotClass: s.config.SnapshotClass,
+			StorageClass:  s.config.StorageClass,
+			WaitTimeout:   s.config.WaitTimeout,
+			SleepDuration: s.config.SleepDuration,
+		})
+		// Schedule cleanup before kicking off the resource creation. If no
+		// resources end up being created this does nothing.
+		defer snapshotter.Cleanup(ctx)
 
-		contentName, err := s.WaitSnapContent(ctx, snapshot)
+		backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, target.Pvc)
 		if err != nil {
-			return fmt.Errorf("Failed to WaitSnapContent: %s", err)
+			return fmt.Errorf("Failed to BackupPvcFromSourcePvc: %s", err)
 		}
-		defer s.DeleteSnapshotContent(ctx, contentName)
-
-		contentHandle, err := s.SnapshotHandleFromContent(ctx, contentName)
-		if err != nil {
-			return fmt.Errorf("Failed to SnapshotHandleFromContent: %s", err)
-		}
-
-		err = s.SnapshotContentFromHandle(ctx, snapshotContentName, contentHandle, snapshotName)
-		if err != nil {
-			return fmt.Errorf("Failed to SnapshotContentFromHandle: %s", err)
-		}
-		defer s.DeleteSnapshotContent(ctx, snapshotContentName)
-
-		err = s.SnapshotFromContent(ctx, snapshotName, &snapshotContentName)
-		if err != nil {
-			return fmt.Errorf("Failed to SnapshotFromContent: %s", err)
-		}
-		defer s.DeleteSnapshot(ctx, s.config.BackupNamespace, snapshotName)
-
-		err = s.WaitSnapshotReady(ctx, &snapshotName)
-		if err != nil {
-			return fmt.Errorf("Failed to WaitSnapshotReady: %s", err)
-		}
-
-		err = s.PVCFromSnapshot(ctx, snapshotName, backupPVCName, storageSize)
-		if err != nil {
-			return fmt.Errorf("Failed to PVCFromSnapshot: %s", err)
-		}
-		defer s.DeletePVC(ctx, backupPVCName)
 
 		profileConfigMap, err := profile.ToConfigMap(repos, s.config.BackupNamespace, configMapName)
 		if err != nil {
@@ -145,7 +115,7 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 		}
 		defer s.DeleteConfigMap(ctx, profileConfigMap.Name)
 
-		err = s.CreateBackupPod(ctx, profileConfigMap, podName, backupPVCName)
+		err = s.CreateBackupPod(ctx, profileConfigMap, podName, backupPvc.Name)
 		if err != nil {
 			return fmt.Errorf("Failed to CreateBackupPod: %s", err)
 		}
@@ -248,341 +218,6 @@ func (s *SnapshotClient) WaitStopped(ctx context.Context, namespace string, sele
 
 		}
 	}
-}
-
-func (s *SnapshotClient) TakeSnapshot(ctx context.Context, namespace string, snapshotName string, pvcName string) (*volumesnapshot.VolumeSnapshot, error) {
-	existingSnapshot, err := s.csiClient.SnapshotV1().VolumeSnapshots(namespace).
-		Get(ctx, snapshotName, metav1.GetOptions{})
-	if err == nil {
-		s.log.Info("Snapshot already exists, not creating new one", "namespace", namespace, "snapshotName", snapshotName)
-		return existingSnapshot, nil
-	}
-
-	// There *is* an error but it might be "not found" which isn't a problem.
-	// Everything else is.
-	if !k8sErrors.IsNotFound(err) {
-		return nil, fmt.Errorf("Error when trying to check for existing snapshot: %w", err)
-	}
-
-	snapshot := volumesnapshot.VolumeSnapshot{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      snapshotName,
-			Namespace: namespace,
-		},
-		Spec: volumesnapshot.VolumeSnapshotSpec{
-			VolumeSnapshotClassName: &s.config.SnapshotClass,
-			Source: volumesnapshot.VolumeSnapshotSource{
-				PersistentVolumeClaimName: &pvcName,
-			},
-		},
-	}
-	createdSnapshot, err := s.csiClient.SnapshotV1().
-		VolumeSnapshots(namespace).
-		Create(ctx, &snapshot, metav1.CreateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("Error creating snapshot: %w", err)
-	}
-
-	s.log.Info("Snapshot created", "namespace", namespace, "snapshotName", snapshotName)
-
-	return createdSnapshot, nil
-}
-
-func (s *SnapshotClient) SnapshotFromContent(ctx context.Context, snapshotName string, contentName *string) error {
-	_, err := s.csiClient.SnapshotV1().
-		VolumeSnapshots(s.config.BackupNamespace).
-		Get(ctx, snapshotName, metav1.GetOptions{})
-
-	if err == nil {
-		s.log.Info("Snapshot already exists, not creating new one", "namespace", s.config.BackupNamespace, "snapshotName", snapshotName)
-		return nil
-	}
-
-	if !k8sErrors.IsNotFound(err) {
-		s.log.Error("Unexpected error when checking for existing snapshot", "err", err, "namespace", s.config.BackupNamespace, "snapshotName", snapshotName)
-		return fmt.Errorf("Error when checking for existing snapshot: %w", err)
-	}
-
-	snapshot := volumesnapshot.VolumeSnapshot{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      snapshotName,
-			Namespace: s.config.BackupNamespace,
-		},
-		Spec: volumesnapshot.VolumeSnapshotSpec{
-			Source: volumesnapshot.VolumeSnapshotSource{
-				VolumeSnapshotContentName: contentName,
-			},
-		},
-	}
-	_, err = s.csiClient.SnapshotV1().
-		VolumeSnapshots(s.config.BackupNamespace).
-		Create(ctx, &snapshot, metav1.CreateOptions{})
-
-	s.log.Info("Created Snapshot from content", "namespace", s.config.BackupNamespace, "snapshotName", snapshotName, "contentName", contentName)
-
-	return err
-}
-
-func (s *SnapshotClient) DeleteSnapshot(ctx context.Context, namespace string, snapshotName string) error {
-	err := s.csiClient.SnapshotV1().
-		VolumeSnapshots(namespace).
-		Delete(ctx, snapshotName, metav1.DeleteOptions{})
-	if err != nil {
-		s.log.Error("Error deleting snapshot", "namespace", namespace, "snapshotName", snapshotName, "err", err)
-		return err
-	}
-
-	s.log.Info("Deleted snapshot", "namespace", namespace, "snapshotName", snapshotName)
-	return nil
-}
-
-func (s *SnapshotClient) SnapshotContentFromHandle(ctx context.Context, snapshotContentName string, snapshotContentHandle string, snapshotName string) error {
-	_, err := s.csiClient.SnapshotV1().
-		VolumeSnapshotContents().
-		Get(ctx, snapshotContentName, metav1.GetOptions{})
-	if err == nil {
-		s.log.Info("SnapshotContent already exists, not creating new one", "snapshotContentName", snapshotContentName)
-		return nil
-	}
-
-	if !k8sErrors.IsNotFound(err) {
-		return fmt.Errorf("Error checking for existing SnapshotContent: %w", err)
-	}
-
-	snapshotContent := volumesnapshot.VolumeSnapshotContent{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: snapshotContentName,
-		},
-		Spec: volumesnapshot.VolumeSnapshotContentSpec{
-			DeletionPolicy:          volumesnapshot.VolumeSnapshotContentDelete,
-			Driver:                  s.config.SnapshotDriver,
-			VolumeSnapshotClassName: &s.config.SnapshotClass,
-			Source: volumesnapshot.VolumeSnapshotContentSource{
-				SnapshotHandle: &snapshotContentHandle,
-			},
-			VolumeSnapshotRef: corev1.ObjectReference{
-				Name:      snapshotName,
-				Namespace: s.config.BackupNamespace,
-			},
-		},
-	}
-	_, err = s.csiClient.SnapshotV1().
-		VolumeSnapshotContents().
-		Create(ctx, &snapshotContent, metav1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("Error creating SnapshotContents: %w", err)
-	}
-
-	s.log.Info("Created SnapshotContent from handle", "snapshotContentName", snapshotContentName, "snapshotContentHandle", snapshotContentHandle)
-
-	return nil
-}
-
-func (s *SnapshotClient) WaitSnapContent(ctx context.Context, snapshot *volumesnapshot.VolumeSnapshot) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, s.config.WaitTimeout)
-	defer cancel()
-	namespace := snapshot.ObjectMeta.Namespace
-	snapshotName := snapshot.ObjectMeta.Name
-	log := s.log.With("namespace", namespace, "snapshotName", snapshotName)
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Error("Timed out waiting for SnapshotContent to be bound to Snapshot")
-			return "", fmt.Errorf("Timeout")
-
-		default:
-			snapshot, err := s.csiClient.SnapshotV1().
-				VolumeSnapshots(namespace).
-				Get(ctx, snapshotName, metav1.GetOptions{})
-			if err != nil {
-				return "", fmt.Errorf("Error getting snapshot: %w", err)
-			}
-
-			if snapshot.Status != nil && snapshot.Status.BoundVolumeSnapshotContentName != nil {
-				log.Info("Snapshot has been bound to content", "namespace", namespace, "snapshotName", snapshotName, "contentName", *snapshot.Status.BoundVolumeSnapshotContentName)
-				return *snapshot.Status.BoundVolumeSnapshotContentName, nil
-			}
-
-			time.Sleep(s.config.SleepDuration)
-
-		}
-	}
-}
-
-func (s *SnapshotClient) DeleteSnapshotContent(ctx context.Context, snapshotContentName string) error {
-	err := s.csiClient.SnapshotV1().
-		VolumeSnapshotContents().
-		Delete(ctx, snapshotContentName, metav1.DeleteOptions{})
-	if err != nil {
-		s.log.Error("Failed to delete SnapshotContent", "snapshotContentName", snapshotContentName, "err", err)
-		return err
-	}
-	s.log.Info("Deleted SnapshotContent", "snapshotContentName", snapshotContentName)
-	return nil
-}
-
-func (s *SnapshotClient) SnapshotHandleFromContent(ctx context.Context, contentName string) (string, error) {
-	for {
-		snapshotContent, err := s.csiClient.SnapshotV1().
-			VolumeSnapshotContents().
-			Get(ctx, contentName, metav1.GetOptions{})
-		if err != nil {
-			return "", fmt.Errorf("Error getting snapshotContent: %w", err)
-		}
-
-		if snapshotContent.Status != nil && snapshotContent.Status.SnapshotHandle != nil {
-			s.log.Info("SnapshotHandle is ready", "contentName", contentName, "SnapshotHandle", *snapshotContent.Status.SnapshotHandle)
-			return *snapshotContent.Status.SnapshotHandle, nil
-		}
-
-		s.log.Debug("SnapshotHandle is not ready yet", "contentName", contentName)
-		time.Sleep(s.config.SleepDuration)
-	}
-}
-
-func (s *SnapshotClient) WaitSnapshotReady(ctx context.Context, snapshotName *string) error {
-	ctx, cancel := context.WithTimeout(ctx, s.config.WaitTimeout)
-	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			s.log.Error("Timed out waiting for snapshot to be ready")
-			return fmt.Errorf("Timeout")
-
-		default:
-			snapshot, err := s.csiClient.SnapshotV1().
-				VolumeSnapshots(s.config.BackupNamespace).
-				Get(ctx, *snapshotName, metav1.GetOptions{})
-
-			if err != nil {
-				s.log.Error("Error when waiting for snapshot to be ready", "namespace", s.config.BackupNamespace, "snapshotName", snapshotName, "err", err)
-				return fmt.Errorf("Error waiting for snapshot to be ready: %w", err)
-			}
-
-			if snapshot.Status != nil && snapshot.Status.ReadyToUse != nil && *snapshot.Status.ReadyToUse {
-				s.log.Info("Snapshot is ready to use", "namespace", s.config.BackupNamespace, "snapshotName", *snapshotName)
-				return nil
-			}
-
-			s.log.Debug("Snapshot is not ready yet", "namespace", s.config.BackupNamespace, "snapshotName", *snapshotName)
-			time.Sleep(s.config.SleepDuration)
-		}
-	}
-}
-
-func (s *SnapshotClient) PVCFromSnapshot(ctx context.Context, snapshotName string, pvcName string, storageSize resource.Quantity) error {
-	log := s.log.With("namespace", s.config.BackupNamespace, "pvcName", pvcName)
-	// Check if PVC already exists
-	_, err := s.kubeClient.CoreV1().
-		PersistentVolumeClaims(s.config.BackupNamespace).
-		Get(ctx, pvcName, metav1.GetOptions{})
-	if err == nil {
-		log.Info("PVC already exists, not creating new one")
-		return nil
-	}
-
-	apiGroup := volumesnapshot.GroupName
-
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: s.config.BackupNamespace,
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			DataSource: &corev1.TypedLocalObjectReference{
-				Name:     snapshotName,
-				Kind:     "VolumeSnapshot",
-				APIGroup: &apiGroup,
-			},
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteOnce,
-			},
-			StorageClassName: &s.config.StorageClass,
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: storageSize,
-				},
-			},
-		},
-	}
-
-	_, err = s.kubeClient.CoreV1().
-		PersistentVolumeClaims(s.config.BackupNamespace).
-		Create(ctx, pvc, metav1.CreateOptions{})
-	if err != nil {
-		log.Error("Error creating PVC", "snapshotName", snapshotName, "err", err)
-		return fmt.Errorf("Error creating PVC: %w", err)
-	}
-
-	log.Info("Created new PVC", "snapshotName", snapshotName, "err", err)
-
-	ctx, cancel := context.WithTimeout(ctx, s.config.WaitTimeout)
-	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			s.log.Error("Timed out waiting for PVC to be ready")
-			return fmt.Errorf("Timeout")
-
-		default:
-			pvc, err = s.kubeClient.CoreV1().
-				PersistentVolumeClaims(s.config.BackupNamespace).
-				Get(ctx, pvcName, metav1.GetOptions{})
-			if err != nil {
-				if !k8sErrors.IsNotFound(err) {
-					log.Error("Unexpected error when waiting for PVC to be ready")
-					return err
-				}
-				log.Warn("PVC does not exist yet, waiting for it to appear")
-				continue
-			}
-
-			if pvc.Status.Phase == corev1.ClaimBound {
-				log.Info("PVC is ready")
-				return nil
-			}
-
-			log.Debug("Waiting for PVC to be ready")
-			time.Sleep(s.config.SleepDuration)
-
-		}
-	}
-}
-
-func (s *SnapshotClient) DeletePVC(ctx context.Context, pvcName string) error {
-	log := s.log.With("namespace", s.config.BackupNamespace, "pvcName", pvcName)
-	pvc, err := s.kubeClient.CoreV1().
-		PersistentVolumeClaims(s.config.BackupNamespace).
-		Get(ctx, pvcName, metav1.GetOptions{})
-	if err != nil {
-		if k8sErrors.IsNotFound(err) {
-			log.Warn("PVC does not exist, skipping deletion. Warning: PersistentVolume might still exist and be dangling")
-			return nil
-		}
-		log.Error("Unexpected error when checking if PVC exists", "err", err)
-		return err
-	}
-	pvName := pvc.Spec.VolumeName
-
-	err = s.kubeClient.CoreV1().
-		PersistentVolumeClaims(s.config.BackupNamespace).
-		Delete(ctx, pvcName, metav1.DeleteOptions{})
-	if err != nil {
-		s.log.Error("Error deleting PVC", "err", err)
-		return err
-	}
-
-	log.Info("Deleted PVC")
-
-	err = s.kubeClient.CoreV1().
-		PersistentVolumes().
-		Delete(ctx, pvName, metav1.DeleteOptions{})
-	if err != nil {
-		log.Error("Error deleting PV", "pvName", pvName)
-	}
-	log.Info("Deleted PV", "pvName", pvName)
-	return nil
 }
 
 func (s *SnapshotClient) CreateConfigMap(ctx context.Context, configMap *corev1.ConfigMap) error {

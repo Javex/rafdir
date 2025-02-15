@@ -18,15 +18,19 @@ type BackupTarget struct {
 	NodeName  string
 }
 
-// DetermineNodes figures out which node each pod lives on and assigns it
-// accordingly
+// NewBackupTargetFromDeploymentName creates a BackupTarget from a namespace
+// and a deployment name. It finds the deployment, then the pod, then the PVC
+// and the node name the pod is running on.
 func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, namespace string, deploymentName string) (*BackupTarget, error) {
-	deployment, err := FindDeploymentByName(ctx, kubeclient, namespace, deploymentName)
+	deployment, err := findDeploymentByName(ctx, kubeclient, namespace, deploymentName)
 	if err != nil {
 		return nil, err
 	}
 
-	selector := SelectorFromDeployment(deployment)
+	selector := selectorFromDeployment(deployment)
+	if selector == "" {
+		return nil, fmt.Errorf("selector not found for deployment %s", deploymentName)
+	}
 
 	podList, err := kubeclient.CoreV1().
 		Pods(namespace).
@@ -48,7 +52,7 @@ func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, ku
 		return nil, fmt.Errorf("pod %s has no node", pod.Name)
 	}
 
-	pvc, err := PvcFromPod(ctx, log, kubeclient, pod)
+	pvc, err := pvcFromPod(ctx, log, kubeclient, pod)
 	if err != nil {
 		return nil, err
 	}
@@ -63,10 +67,10 @@ func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, ku
 	return target, nil
 }
 
-// PvcFromPod iterates through all volumes and determines a PVC as backup
+// pvcFromPod iterates through all volumes and determines a PVC as backup
 // target. It is an error if there is no PVC. It is also an error if there is
 // more than one PVC.
-func PvcFromPod(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, pod corev1.Pod) (*corev1.PersistentVolumeClaim, error) {
+func pvcFromPod(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, pod corev1.Pod) (*corev1.PersistentVolumeClaim, error) {
 	pvcName := ""
 	for _, volume := range pod.Spec.Volumes {
 		if volume.PersistentVolumeClaim == nil {
@@ -94,18 +98,21 @@ func PvcFromPod(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Int
 	return pvc, nil
 }
 
-// SelectorFromDeployment returns a label selector for a deployment
-func SelectorFromDeployment(deployment *appsv1.Deployment) string {
+// selectorFromDeployment returns a label selector for a deployment
+func selectorFromDeployment(deployment *appsv1.Deployment) string {
 	matchLabels := deployment.Spec.Selector.MatchLabels
 	// create selector from matchLabels
 	selector := ""
 	for k, v := range matchLabels {
 		selector += k + "=" + v + ","
 	}
+	if selector == "" {
+		return ""
+	}
 	return selector[:len(selector)-1]
 }
 
-func FindDeploymentByName(ctx context.Context, kubeclient kubernetes.Interface, namespace string, name string) (*appsv1.Deployment, error) {
+func findDeploymentByName(ctx context.Context, kubeclient kubernetes.Interface, namespace string, name string) (*appsv1.Deployment, error) {
 	deployment, err := kubeclient.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return nil, err

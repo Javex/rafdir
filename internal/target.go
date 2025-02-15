@@ -87,7 +87,7 @@ func pvcFromPod(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Int
 		return nil, fmt.Errorf("no PVC found")
 	}
 
-	//
+	// Look up the PVC
 	pvc, err := kubeclient.CoreV1().
 		PersistentVolumeClaims(pod.Namespace).
 		Get(ctx, pvcName, metav1.GetOptions{})

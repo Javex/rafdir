@@ -126,7 +126,7 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 	return nil
 }
 
-func getK8sConfig(kubeconfig *string) (*rest.Config, error) {
+func GetK8sConfig(kubeconfig *string) (*rest.Config, error) {
 	// Build the config from the kubeconfig file
 	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
@@ -136,12 +136,7 @@ func getK8sConfig(kubeconfig *string) (*rest.Config, error) {
 	return config, err
 }
 
-func InitK8sClient(kubeconfig *string) (*kubernetes.Clientset, error) {
-	config, err := getK8sConfig(kubeconfig)
-	if err != nil {
-		return nil, err
-	}
-
+func InitK8sClient(config *rest.Config) (*kubernetes.Clientset, error) {
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
@@ -150,12 +145,7 @@ func InitK8sClient(kubeconfig *string) (*kubernetes.Clientset, error) {
 	return clientset, nil
 }
 
-func InitCSIClient(kubeconfig *string) (*csiClientset.Clientset, error) {
-	config, err := getK8sConfig(kubeconfig)
-	if err != nil {
-		return nil, err
-	}
-
+func InitCSIClient(config *rest.Config) (*csiClientset.Clientset, error) {
 	csiClient, err := csiClientset.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CSI client: %w", err)

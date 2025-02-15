@@ -10,7 +10,11 @@ import (
 	"resticprofilek8s"
 	"resticprofilek8s/internal"
 
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/homedir"
+
+	csiClientset "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned"
 )
 
 func main() {
@@ -19,14 +23,34 @@ func main() {
 	namespace := "backup"
 	configMapName := "resticprofile-kubernetes-config"
 	ctx := context.Background()
-	kubeClient, err := resticprofilek8s.InitK8sClient(kubeconfig)
-	if err != nil {
-		panic(fmt.Errorf("Failed to create k8s client: %s", err))
-	}
 
-	csiClient, err := resticprofilek8s.InitCSIClient(kubeconfig)
-	if err != nil {
-		panic(fmt.Errorf("Failed to create csi client: %s", err))
+	var kubeClient *kubernetes.Clientset
+	var csiClient *csiClientset.Clientset
+
+	if cfg, err := rest.InClusterConfig(); err == nil {
+		kubeClient, err = resticprofilek8s.InitK8sClient(cfg)
+		if err != nil {
+			panic(fmt.Errorf("Failed to create k8s client: %s", err))
+		}
+		csiClient, err = resticprofilek8s.InitCSIClient(cfg)
+		if err != nil {
+			panic(fmt.Errorf("Failed to create csi client: %s", err))
+		}
+	} else {
+		cfg, err := resticprofilek8s.GetK8sConfig(kubeconfig)
+		if err != nil {
+			panic(fmt.Errorf("Failed to get k8s config: %s", err))
+		}
+
+		kubeClient, err = resticprofilek8s.InitK8sClient(cfg)
+		if err != nil {
+			panic(fmt.Errorf("Failed to create k8s client: %s", err))
+		}
+
+		csiClient, err = resticprofilek8s.InitCSIClient(cfg)
+		if err != nil {
+			panic(fmt.Errorf("Failed to create csi client: %s", err))
+		}
 	}
 
 	log := slog.Default()

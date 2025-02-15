@@ -56,8 +56,6 @@ type PvcSnapshotter struct {
 
 	// Resources created that need to be cleaned up at the end
 	sourceSnapshotName string
-	sourceContentName  string
-	destContentName    string
 	destSnapshotName   string
 	destPvcName        string
 }
@@ -108,7 +106,6 @@ func (s *PvcSnapshotter) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *
 	if err != nil {
 		return nil, fmt.Errorf("Failed to waitSnapContent: %s", err)
 	}
-	s.sourceContentName = sourceContentName
 
 	contentHandle, err := s.snapshotHandleFromContent(ctx, sourceContentName)
 	if err != nil {
@@ -119,7 +116,6 @@ func (s *PvcSnapshotter) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *
 	if err != nil {
 		return nil, fmt.Errorf("Failed to snapshotContentFromHandle: %s", err)
 	}
-	s.destContentName = snapshotContentName
 
 	err = s.snapshotFromContent(ctx, snapshotName, &snapshotContentName)
 	if err != nil {
@@ -144,14 +140,6 @@ func (s *PvcSnapshotter) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *
 func (s *PvcSnapshotter) Cleanup(ctx context.Context) {
 	if s.sourceSnapshotName != "" {
 		s.deleteSnapshot(ctx, s.sourceNamespace, s.sourceSnapshotName)
-	}
-
-	if s.sourceContentName != "" {
-		s.deleteSnapshotContent(ctx, s.sourceContentName)
-	}
-
-	if s.destContentName != "" {
-		s.deleteSnapshotContent(ctx, s.destContentName)
 	}
 
 	if s.destSnapshotName != "" {
@@ -454,7 +442,7 @@ func (s *PvcSnapshotter) pvcFromSnapshot(ctx context.Context, snapshotName strin
 		return nil, fmt.Errorf("Error creating PVC: %w", err)
 	}
 
-	log.Info("Created new PVC", "snapshotName", snapshotName, "err", err)
+	log.Info("Created new PVC", "snapshotName", snapshotName)
 
 	ctx, cancel := context.WithTimeout(ctx, s.waitTimeout)
 	defer cancel()
@@ -491,18 +479,17 @@ func (s *PvcSnapshotter) pvcFromSnapshot(ctx context.Context, snapshotName strin
 
 func (s *PvcSnapshotter) deletePVC(ctx context.Context, pvcName string) error {
 	log := s.log.With("namespace", s.destNamespace, "pvcName", pvcName)
-	pvc, err := s.kubeClient.CoreV1().
+	_, err := s.kubeClient.CoreV1().
 		PersistentVolumeClaims(s.destNamespace).
 		Get(ctx, pvcName, metav1.GetOptions{})
 	if err != nil {
 		if k8sErrors.IsNotFound(err) {
-			log.Warn("PVC does not exist, skipping deletion. Warning: PersistentVolume might still exist and be dangling")
+			log.Warn("PVC does not exist, skipping deletion.")
 			return nil
 		}
 		log.Error("Unexpected error when checking if PVC exists", "err", err)
 		return err
 	}
-	pvName := pvc.Spec.VolumeName
 
 	err = s.kubeClient.CoreV1().
 		PersistentVolumeClaims(s.destNamespace).
@@ -513,13 +500,5 @@ func (s *PvcSnapshotter) deletePVC(ctx context.Context, pvcName string) error {
 	}
 
 	log.Info("Deleted PVC")
-
-	err = s.kubeClient.CoreV1().
-		PersistentVolumes().
-		Delete(ctx, pvName, metav1.DeleteOptions{})
-	if err != nil {
-		log.Error("Error deleting PV", "pvName", pvName)
-	}
-	log.Info("Deleted PV", "pvName", pvName)
 	return nil
 }

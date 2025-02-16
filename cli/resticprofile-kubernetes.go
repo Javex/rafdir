@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"resticprofilek8s"
 	"resticprofilek8s/internal"
+	"strings"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -64,9 +65,13 @@ func main() {
 	if err != nil {
 		panic(fmt.Errorf("Failed to create client: %s", err))
 	}
-	err = client.TakeBackup(ctx)
-	if err != nil {
-		panic(fmt.Errorf("Error taking backup: %s", err))
+	errs := client.TakeBackup(ctx)
+	if len(errs) > 0 {
+		var errMsgs []string
+		for _, err := range errs {
+			errMsgs = append(errMsgs, err.Error())
+		}
+		panic(fmt.Errorf("Error taking backup: %s", strings.Join(errMsgs, "\n")))
 	}
 }
 

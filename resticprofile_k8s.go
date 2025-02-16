@@ -36,104 +36,114 @@ func NewClient(log *slog.Logger, kubeClient kubernetes.Interface, csiClient csiC
 	return &client, nil
 }
 
-func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
+func (s *SnapshotClient) TakeBackup(ctx context.Context) []error {
 	log := s.log
 	log.Info("Starting backup run")
+	config := s.config
+	profiles := config.Profiles
+
+	baseProfile, err := s.config.BaseProfile()
+	if err != nil {
+		return []error{fmt.Errorf("Failed to render base profile: %s", err)}
+	}
+
+	errors := make([]error, 0)
+	for _, profile := range profiles {
+		err = s.profileBackup(ctx, &profile, baseProfile)
+		if err != nil {
+			errors = append(errors, err)
+		}
+	}
+	return errors
+}
+
+func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Profile, baseProfile string) error {
+	log := s.log.With("profile", profile.Name)
 	// Suffix to apply to all resources managed by this run. Existing resources
 	// will be skipped to create an idempotent run. Resources will be deleted
 	// when they are no longer needed.
 	runSuffix := "testing"
 	config := s.config
-	profiles := config.Profiles
 	repos := config.Repositories
-
-	baseProfile, err := s.config.BaseProfile()
+	namespace := profile.Namespace
+	target, err := internal.NewBackupTargetFromDeploymentName(ctx, log, s.kubeClient, namespace, profile.Deployment)
 	if err != nil {
-		return fmt.Errorf("Failed to render base profile: %s", err)
+		return fmt.Errorf("Failed to NewBackupTargetFromDeploymentName: %s", err)
 	}
 
-	for _, profile := range profiles {
+	podName := fmt.Sprintf("%s-%s-%s", profile.Name, target.PodName, runSuffix)
+	configMapName := fmt.Sprintf("%s-%s", profile.Name, runSuffix)
 
-		namespace := profile.Namespace
-		target, err := internal.NewBackupTargetFromDeploymentName(ctx, log, s.kubeClient, namespace, profile.Deployment)
+	var scaleUp func()
+	if profile.Stop {
+
+		oldReplicas, err := s.ScaleTo(ctx, namespace, profile.Deployment, 0)
 		if err != nil {
-			return fmt.Errorf("Failed to NewBackupTargetFromDeploymentName: %s", err)
+			log.Error("Error scaling down deployment", "err", err)
+			return fmt.Errorf("Failed to ScaleTo: %s", err)
 		}
 
-		podName := fmt.Sprintf("%s-%s-%s", profile.Name, target.PodName, runSuffix)
-		configMapName := fmt.Sprintf("%s-%s", profile.Name, runSuffix)
-
-		var scaleUp func()
-		if profile.Stop {
-
-			oldReplicas, err := s.ScaleTo(ctx, namespace, profile.Deployment, 0)
+		// Create callback to scale deployment back up once snapshot has been
+		// taken.
+		scaleUp = func() {
+			oldReplicas, err = s.ScaleTo(ctx, namespace, profile.Deployment, oldReplicas)
 			if err != nil {
-				log.Error("Error scaling down deployment", "err", err)
-				return fmt.Errorf("Failed to ScaleTo: %s", err)
+				log.Error("Failed scale replicas back up", "err", err, "deploymentName", profile.Deployment, "namespace", namespace)
+				return
 			}
 
-			// Create callback to scale deployment back up once snapshot has been
-			// taken.
-			scaleUp = func() {
-				oldReplicas, err = s.ScaleTo(ctx, namespace, profile.Deployment, oldReplicas)
-				if err != nil {
-					log.Error("Failed scale replicas back up", "err", err, "deploymentName", profile.Deployment, "namespace", namespace)
-					return
-				}
-
-				if oldReplicas != 0 {
-					log.Error("Unexpected non-zero old replica count", "err", err, "deploymentName", profile.Deployment, "namespace", namespace, "oldReplicas", oldReplicas)
-					return
-				}
+			if oldReplicas != 0 {
+				log.Error("Unexpected non-zero old replica count", "err", err, "deploymentName", profile.Deployment, "namespace", namespace, "oldReplicas", oldReplicas)
+				return
 			}
-
-			// Wait until all pods have stopped
-			err = s.WaitStopped(ctx, namespace, target.Selector)
-			if err != nil {
-				log.Error("Error waiting for pods to stop", "err", err, "deploymentName", profile.Deployment, "namespace", namespace)
-				return fmt.Errorf("Failed WaitStopped: %s", err)
-			}
-
-			log.Info("Deployment scaled down", "deploymentName", profile.Deployment, "namespace", namespace)
 		}
 
-		snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
-			DestNamespace: s.config.BackupNamespace,
-			RunSuffix:     runSuffix,
-			SnapshotClass: s.config.SnapshotClass,
-			StorageClass:  s.config.StorageClass,
-			WaitTimeout:   s.config.WaitTimeout,
-			SleepDuration: s.config.SleepDuration,
-		})
-		// Schedule cleanup before kicking off the resource creation. If no
-		// resources end up being created this does nothing.
-		defer snapshotter.Cleanup(ctx)
-
-		backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, target.Pvc, scaleUp)
+		// Wait until all pods have stopped
+		err = s.WaitStopped(ctx, namespace, target.Selector)
 		if err != nil {
-			return fmt.Errorf("Failed to BackupPvcFromSourcePvc: %s", err)
+			log.Error("Error waiting for pods to stop", "err", err, "deploymentName", profile.Deployment, "namespace", namespace)
+			return fmt.Errorf("Failed WaitStopped: %s", err)
 		}
 
-		profileConfigMap, err := profile.ToConfigMap(repos, s.config.BackupNamespace, configMapName)
-		if err != nil {
-			return fmt.Errorf("Failed to ToConfigMap: %s", err)
-		}
-		profileConfigMap.Data["profiles.yaml"] = baseProfile
-
-		err = s.CreateConfigMap(ctx, profileConfigMap)
-		if err != nil {
-			return fmt.Errorf("Failed to CreateConfigMap: %s", err)
-		}
-		defer s.DeleteConfigMap(ctx, profileConfigMap.Name)
-
-		err = s.CreateBackupPod(ctx, profileConfigMap, podName, backupPvc.Name)
-		if err != nil {
-			return fmt.Errorf("Failed to CreateBackupPod: %s", err)
-		}
-		s.WaitPod(ctx, podName)
-		defer s.DeletePod(ctx, podName)
-
+		log.Info("Deployment scaled down", "deploymentName", profile.Deployment, "namespace", namespace)
 	}
+
+	snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
+		DestNamespace: s.config.BackupNamespace,
+		RunSuffix:     runSuffix,
+		SnapshotClass: s.config.SnapshotClass,
+		StorageClass:  s.config.StorageClass,
+		WaitTimeout:   s.config.WaitTimeout,
+		SleepDuration: s.config.SleepDuration,
+	})
+	// Schedule cleanup before kicking off the resource creation. If no
+	// resources end up being created this does nothing.
+	defer snapshotter.Cleanup(ctx)
+
+	backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, target.Pvc, scaleUp)
+	if err != nil {
+		return fmt.Errorf("Failed to BackupPvcFromSourcePvc: %s", err)
+	}
+
+	profileConfigMap, err := profile.ToConfigMap(repos, s.config.BackupNamespace, configMapName)
+	if err != nil {
+		return fmt.Errorf("Failed to ToConfigMap: %s", err)
+	}
+	profileConfigMap.Data["profiles.yaml"] = baseProfile
+
+	err = s.CreateConfigMap(ctx, profileConfigMap)
+	if err != nil {
+		return fmt.Errorf("Failed to CreateConfigMap: %s", err)
+	}
+	defer s.DeleteConfigMap(ctx, profileConfigMap.Name)
+
+	err = s.CreateBackupPod(ctx, profileConfigMap, podName, backupPvc.Name)
+	if err != nil {
+		return fmt.Errorf("Failed to CreateBackupPod: %s", err)
+	}
+	s.WaitPod(ctx, podName)
+	defer s.DeletePod(ctx, podName)
+
 	return nil
 }
 

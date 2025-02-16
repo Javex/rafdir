@@ -23,7 +23,7 @@ func TestProfilesFromYaml(t *testing.T) {
           namespace: testNamespace
           deployment: testDeployment
           host: test.example.com
-          Folders: 
+          folders:
             - /test/folder
       `,
 
@@ -47,7 +47,7 @@ func TestProfilesFromYaml(t *testing.T) {
           deployment: testDeployment
           host: test.example.com
           stop: true
-          Folders: 
+          folders:
             - /test/folder
       `,
 
@@ -62,14 +62,48 @@ func TestProfilesFromYaml(t *testing.T) {
 				},
 			},
 		},
+		{
+			"stdInCommand",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          stdin-command: "test command"
+      `,
+
+			map[string]internal.Profile{
+				"test": {
+					Name:         "test",
+					Namespace:    "testNamespace",
+					Deployment:   "testDeployment",
+					Host:         "test.example.com",
+					StdInCommand: "test command",
+				},
+			},
+		},
+		{
+			"disabled",
+			`
+        test:
+          disabled: true
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          stdin-command: "test command"
+      `,
+			map[string]internal.Profile{},
+		},
 	}
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
 
-			profiles, err := internal.ProfilesFromYamlString(tc.profileString)
-			if err != nil {
-				t.Fatalf("Error parsing yaml: %v", err)
+			profiles, errs := internal.ProfilesFromYamlString(tc.profileString)
+			if len(errs) > 0 {
+				t.Fatalf("Error parsing yaml: %v", errs)
 			}
 
 			if !cmp.Equal(profiles, tc.expProfile) {
@@ -99,9 +133,12 @@ func TestProfilesFromYamlErrors(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := internal.ProfilesFromYamlString(tc.profileString)
-			if err == nil {
+			res, errs := internal.ProfilesFromYamlString(tc.profileString)
+			if len(errs) == 0 {
 				t.Fatalf("Expected an error, but got nil")
+			}
+			if len(res) > 0 {
+				t.Fatalf("Expected empty profiles, but got %v", len(res))
 			}
 		})
 	}
@@ -135,6 +172,54 @@ func TestProfileToTOML(t *testing.T) {
     "/test/folder",
     "/test/folder2",
     ]
+    host = "test.example.com"
+  [testName-testRepo.snapshots]
+    tag = ["testName"]
+    host = "test.example.com"
+`,
+		},
+		{
+			name: "stdinCommand",
+			profile: internal.Profile{
+				Name:         "testName",
+				Namespace:    "testNamespace",
+				Host:         "test.example.com",
+				StdInCommand: "test command",
+			},
+			repo: internal.Repository{
+				Name: "testRepo",
+			},
+			expTOML: `
+[testName-testRepo]
+  inherit = "testRepo"
+  [testName-testRepo.backup]
+    tag = ["testName"]
+    stdin = true
+    host = "test.example.com"
+  [testName-testRepo.snapshots]
+    tag = ["testName"]
+    host = "test.example.com"
+`,
+		},
+		{
+			name: "stdinCommandWithFilename",
+			profile: internal.Profile{
+				Name:          "testName",
+				Namespace:     "testNamespace",
+				Host:          "test.example.com",
+				StdInCommand:  "test command",
+				StdInFilename: "testfile",
+			},
+			repo: internal.Repository{
+				Name: "testRepo",
+			},
+			expTOML: `
+[testName-testRepo]
+  inherit = "testRepo"
+  [testName-testRepo.backup]
+    tag = ["testName"]
+    stdin = true
+    stdin-filename = "testfile"
     host = "test.example.com"
   [testName-testRepo.snapshots]
     tag = ["testName"]
@@ -207,8 +292,7 @@ func TestProfilesToConfigMap(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			cm, err := internal.ProfilesToConfigMap(
-				map[string]internal.Profile{"test": tc.profile},
+			cm, err := tc.profile.ToConfigMap(
 				[]internal.Repository{tc.repo},
 				tc.backupNamespace,
 				tc.configMapName,

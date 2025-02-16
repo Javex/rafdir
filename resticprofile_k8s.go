@@ -71,7 +71,7 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 		return fmt.Errorf("Failed to NewBackupTargetFromDeploymentName: %s", err)
 	}
 
-	podName := fmt.Sprintf("%s-%s-%s", profile.Name, target.PodName, runSuffix)
+	podName := fmt.Sprintf("%s-%s-%s", profile.Name, target.Pod.Name, runSuffix)
 	configMapName := fmt.Sprintf("%s-%s", profile.Name, runSuffix)
 
 	var scaleUp func()
@@ -108,21 +108,33 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 		log.Info("Deployment scaled down", "deploymentName", profile.Deployment, "namespace", namespace)
 	}
 
-	snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
-		DestNamespace: s.config.BackupNamespace,
-		RunSuffix:     runSuffix,
-		SnapshotClass: s.config.SnapshotClass,
-		StorageClass:  s.config.StorageClass,
-		WaitTimeout:   s.config.WaitTimeout,
-		SleepDuration: s.config.SleepDuration,
-	})
-	// Schedule cleanup before kicking off the resource creation. If no
-	// resources end up being created this does nothing.
-	defer snapshotter.Cleanup(ctx)
+	backupPod := s.NewBackupPod(podName)
 
-	backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, target.Pvc, scaleUp)
-	if err != nil {
-		return fmt.Errorf("Failed to BackupPvcFromSourcePvc: %s", err)
+	if len(profile.Folders) > 0 {
+
+		snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
+			DestNamespace: s.config.BackupNamespace,
+			RunSuffix:     runSuffix,
+			SnapshotClass: s.config.SnapshotClass,
+			StorageClass:  s.config.StorageClass,
+			WaitTimeout:   s.config.WaitTimeout,
+			SleepDuration: s.config.SleepDuration,
+		})
+		// Schedule cleanup before kicking off the resource creation. If no
+		// resources end up being created this does nothing.
+		defer snapshotter.Cleanup(ctx)
+
+		sourcePvc, err := target.FindPvc(ctx, log, s.kubeClient)
+		if err != nil {
+			return fmt.Errorf("Failed to FindPvc: %s", err)
+		}
+
+		backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, sourcePvc, scaleUp)
+		if err != nil {
+			return fmt.Errorf("Failed to BackupPvcFromSourcePvc: %s", err)
+		}
+
+		s.AddPvcToPod(backupPod, backupPvc.Name)
 	}
 
 	profileConfigMap, err := profile.ToConfigMap(repos, s.config.BackupNamespace, configMapName)
@@ -137,7 +149,7 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 	}
 	defer s.DeleteConfigMap(ctx, profileConfigMap.Name)
 
-	err = s.CreateBackupPod(ctx, profileConfigMap, podName, backupPvc.Name)
+	err = s.CreateBackupPod(ctx, profileConfigMap, backupPod)
 	if err != nil {
 		return fmt.Errorf("Failed to CreateBackupPod: %s", err)
 	}
@@ -257,26 +269,10 @@ func (s *SnapshotClient) DeleteConfigMap(ctx context.Context, configMapName stri
 	return nil
 }
 
-func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *corev1.ConfigMap, podName string, backupPVCName string) error {
-	log := s.log.With("namespace", s.config.BackupNamespace, "podName", podName)
-
-	pod, err := s.kubeClient.CoreV1().
-		Pods(s.config.BackupNamespace).
-		Get(ctx, podName, metav1.GetOptions{})
-	if err != nil {
-		if !k8sErrors.IsNotFound(err) {
-			log.Error("Error when checking if pod already exists", "err", err)
-			return err
-		}
-	} else {
-		log.Warn("Pod already exists, not creating")
-		return nil
-	}
-
+func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 	optional := false
 	var readWriteMode int32 = 0775
-
-	pod = &corev1.Pod{
+	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
 			Namespace: s.config.BackupNamespace,
@@ -291,7 +287,6 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *
 					Command: []string{"sh"},
 					Args:    []string{"/usr/local/bin/backup.sh"},
 					VolumeMounts: []corev1.VolumeMount{
-						{Name: "storage", MountPath: "/var/lib/grafana"},
 						{Name: "restic-script", MountPath: "/usr/local/bin"},
 						{Name: "restic-cache", MountPath: "/var/cache/restic"},
 						{Name: "nfs-restic-repo", MountPath: "/mnt/kubernetes-restic"},
@@ -342,14 +337,6 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *
 
 			Volumes: []corev1.Volume{
 				{
-					Name: "storage",
-					VolumeSource: corev1.VolumeSource{
-						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-							ClaimName: backupPVCName,
-						},
-					},
-				},
-				{
 					Name: "restic-script",
 					VolumeSource: corev1.VolumeSource{
 						ConfigMap: &corev1.ConfigMapVolumeSource{
@@ -379,6 +366,43 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *
 			// End Volumes
 
 		},
+	}
+
+	return pod
+}
+
+func (s *SnapshotClient) AddPvcToPod(pod *corev1.Pod, pvcName string) {
+	pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
+		// TODO: Fix
+		Name:      "storage",
+		MountPath: "/var/lib/grafana",
+	})
+
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		// TODO: Fix
+		Name: "storage",
+		VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: pvcName,
+			},
+		},
+	})
+}
+
+func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *corev1.ConfigMap, pod *corev1.Pod) error {
+	log := s.log.With("namespace", s.config.BackupNamespace, "podName", pod.Name)
+
+	_, err := s.kubeClient.CoreV1().
+		Pods(s.config.BackupNamespace).
+		Get(ctx, pod.Name, metav1.GetOptions{})
+	if err != nil {
+		if !k8sErrors.IsNotFound(err) {
+			log.Error("Error when checking if pod already exists", "err", err)
+			return err
+		}
+	} else {
+		log.Warn("Pod already exists, not creating")
+		return nil
 	}
 
 	// Mount all profile's ConfigMap in the container

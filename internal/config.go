@@ -55,11 +55,17 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 	}
 	log.Info("Loaded repositories")
 
-	profiles, err := ProfilesFromGlobalConfigMap(configMap)
-	if err != nil {
-		return nil, err
+	profiles, errs := ProfilesFromGlobalConfigMap(configMap)
+	if len(errs) > 0 {
+		log.Warn("There were errors when loading profiles", "errors", errs)
 	}
-	log.Info("Loaded profiles")
+
+	if profiles == nil || len(profiles) == 0 {
+		log.Error("No valid profiles found, can't continue")
+		return nil, fmt.Errorf("No valid profiles found")
+	}
+
+	log.Info("Loaded profiles", "profileCount", len(profiles))
 
 	return &Config{
 		GlobalConfigFile:   globalConfigFile,

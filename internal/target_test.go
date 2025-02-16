@@ -31,13 +31,19 @@ func (w *testWriter) Write(p []byte) (n int, err error) {
 }
 
 func TestNewBackupTargetFromDeploymentName(t *testing.T) {
+	type targetExpectation struct {
+		PodName   string
+		Namespace string
+		NodeName  string
+		Selector  string
+	}
 	tcs := []struct {
 		name           string
 		deploymentName string
 		deployment     *appsv1.Deployment
 		pods           []*corev1.Pod
 		pvcs           []*corev1.PersistentVolumeClaim
-		expTarget      *internal.BackupTarget
+		expTarget      *targetExpectation
 		expErrContains string
 	}{
 		{
@@ -88,17 +94,11 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 					},
 				},
 			},
-			&internal.BackupTarget{
+			&targetExpectation{
 				PodName:   "testPod",
 				Namespace: "test",
-				Pvc: &corev1.PersistentVolumeClaim{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "testPvc",
-						Namespace: "test",
-					},
-				},
-				NodeName: "testNode",
-				Selector: "testKeySelector=testValueSelector",
+				NodeName:  "testNode",
+				Selector:  "testKeySelector=testValueSelector",
 			},
 			"",
 		},
@@ -260,144 +260,6 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 			nil,
 			"expected 1 pod, got 0",
 		},
-		{
-			"multiplePvcs",
-			"testDeployment",
-			&appsv1.Deployment{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "testDeployment",
-					Namespace: "test",
-				},
-				Spec: appsv1.DeploymentSpec{
-					Selector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"testKeySelector": "testValueSelector",
-						},
-					},
-				},
-			},
-			[]*corev1.Pod{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "testPod",
-						Namespace: "test",
-						Labels: map[string]string{
-							"testKeySelector": "testValueSelector",
-						},
-					},
-					Spec: corev1.PodSpec{
-						NodeName: "testNode",
-						Volumes: []corev1.Volume{
-							{
-								Name: "testPvc",
-								VolumeSource: corev1.VolumeSource{
-									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-										ClaimName: "testPvc",
-									},
-								},
-							},
-							{
-								Name: "testPvc2",
-								VolumeSource: corev1.VolumeSource{
-									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-										ClaimName: "testPvc2",
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			nil,
-			nil,
-			"more than one PVC found",
-		},
-		{
-			"noPvc",
-			"testDeployment",
-			&appsv1.Deployment{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "testDeployment",
-					Namespace: "test",
-				},
-				Spec: appsv1.DeploymentSpec{
-					Selector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"testKeySelector": "testValueSelector",
-						},
-					},
-				},
-			},
-			[]*corev1.Pod{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "testPod",
-						Namespace: "test",
-						Labels: map[string]string{
-							"testKeySelector": "testValueSelector",
-						},
-					},
-					Spec: corev1.PodSpec{
-						NodeName: "testNode",
-						Volumes: []corev1.Volume{
-							{
-								Name: "testEmptyDir",
-								VolumeSource: corev1.VolumeSource{
-									EmptyDir: &corev1.EmptyDirVolumeSource{},
-								},
-							},
-						},
-					},
-				},
-			},
-			nil,
-			nil,
-			"no PVC found",
-		},
-		{
-			"PvcMissing",
-			"testDeployment",
-			&appsv1.Deployment{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "testDeployment",
-					Namespace: "test",
-				},
-				Spec: appsv1.DeploymentSpec{
-					Selector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"testKeySelector": "testValueSelector",
-						},
-					},
-				},
-			},
-			[]*corev1.Pod{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "testPod",
-						Namespace: "test",
-						Labels: map[string]string{
-							"testKeySelector": "testValueSelector",
-						},
-					},
-					Spec: corev1.PodSpec{
-						NodeName: "testNode",
-						Volumes: []corev1.Volume{
-							{
-								Name: "testPvc",
-								VolumeSource: corev1.VolumeSource{
-									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-										ClaimName: "testPvc",
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			nil,
-			nil,
-			"error looking up PVC",
-		},
 	}
 
 	for _, tc := range tcs {
@@ -453,8 +315,293 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 					t.Fatalf("expected no error, got %v", err)
 				}
 
-				if !cmp.Equal(target, tc.expTarget) {
-					t.Errorf("unexpected difference in targets: %v", cmp.Diff(target, tc.expTarget))
+				resTarget := &targetExpectation{
+					PodName:   target.Pod.Name,
+					Namespace: target.Namespace,
+					NodeName:  target.NodeName,
+					Selector:  target.Selector,
+				}
+
+				if !cmp.Equal(resTarget, tc.expTarget) {
+					t.Errorf("unexpected difference in targets: %v", cmp.Diff(resTarget, tc.expTarget))
+				}
+			}
+		})
+	}
+}
+
+func TestFindPvc(t *testing.T) {
+	type targetExpectation struct {
+		PodName   string
+		Namespace string
+		NodeName  string
+		Selector  string
+	}
+	tcs := []struct {
+		name           string
+		deploymentName string
+		deployment     *appsv1.Deployment
+		pods           []*corev1.Pod
+		pvcs           []*corev1.PersistentVolumeClaim
+		expPvcName     string
+		expErrContains string
+	}{
+		{
+			"success",
+			"testDeployment",
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testDeployment",
+					Namespace: "test",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+				},
+			},
+			[]*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPod",
+						Namespace: "test",
+						Labels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "testNode",
+						Volumes: []corev1.Volume{
+							{
+								Name: "testPvc",
+								VolumeSource: corev1.VolumeSource{
+									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testPvc",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			[]*corev1.PersistentVolumeClaim{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPvc",
+						Namespace: "test",
+					},
+				},
+			},
+			"testPvc",
+			"",
+		},
+		{
+			"multiplePvcs",
+			"testDeployment",
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testDeployment",
+					Namespace: "test",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+				},
+			},
+			[]*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPod",
+						Namespace: "test",
+						Labels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "testNode",
+						Volumes: []corev1.Volume{
+							{
+								Name: "testPvc",
+								VolumeSource: corev1.VolumeSource{
+									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testPvc",
+									},
+								},
+							},
+							{
+								Name: "testPvc2",
+								VolumeSource: corev1.VolumeSource{
+									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testPvc2",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+			"",
+			"more than one PVC found",
+		},
+		{
+			"noPvc",
+			"testDeployment",
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testDeployment",
+					Namespace: "test",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+				},
+			},
+			[]*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPod",
+						Namespace: "test",
+						Labels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "testNode",
+						Volumes: []corev1.Volume{
+							{
+								Name: "testEmptyDir",
+								VolumeSource: corev1.VolumeSource{
+									EmptyDir: &corev1.EmptyDirVolumeSource{},
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+			"",
+			"no PVC found",
+		},
+		{
+			"PvcMissing",
+			"testDeployment",
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testDeployment",
+					Namespace: "test",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+				},
+			},
+			[]*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPod",
+						Namespace: "test",
+						Labels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "testNode",
+						Volumes: []corev1.Volume{
+							{
+								Name: "testPvc",
+								VolumeSource: corev1.VolumeSource{
+									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testPvc",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			nil,
+			"",
+			"error looking up PVC",
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			kubeclient := fake.NewSimpleClientset()
+			namespace := "test"
+			if tc.deployment != nil {
+				_, err := kubeclient.
+					AppsV1().
+					Deployments(namespace).
+					Create(ctx, tc.deployment, metav1.CreateOptions{})
+				if err != nil {
+					t.Fatalf("failed to create deployment: %v", err)
+				}
+			}
+
+			if tc.pods != nil {
+				for _, pod := range tc.pods {
+					_, err := kubeclient.
+						CoreV1().
+						Pods(namespace).
+						Create(ctx, pod, metav1.CreateOptions{})
+					if err != nil {
+						t.Fatalf("failed to create pod: %v", err)
+					}
+				}
+			}
+
+			if tc.pvcs != nil {
+				for _, pvc := range tc.pvcs {
+					_, err := kubeclient.
+						CoreV1().
+						PersistentVolumeClaims(namespace).
+						Create(ctx, pvc, metav1.CreateOptions{})
+					if err != nil {
+						t.Fatalf("failed to create pvc: %v", err)
+					}
+				}
+			}
+
+			log := newTestLogger(t)
+			target, err := internal.NewBackupTargetFromDeploymentName(ctx, log, kubeclient, namespace, tc.deploymentName)
+			if err != nil {
+				t.Fatalf("failed to create target: %v", err)
+			}
+
+			pvc, err := target.FindPvc(ctx, log, kubeclient)
+
+			if tc.expErrContains != "" {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tc.expErrContains) {
+					t.Errorf("expected error to contain %q, got %v", tc.expErrContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+
+				if pvc == nil {
+					t.Fatalf("expected pvc, got nil")
+				}
+
+				if pvc.Name != tc.expPvcName {
+					t.Errorf("unexpected pvc name: got %q, expected %q", pvc.Name, tc.expPvcName)
 				}
 			}
 		})

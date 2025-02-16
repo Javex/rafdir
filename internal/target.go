@@ -13,11 +13,12 @@ import (
 )
 
 type BackupTarget struct {
-	PodName   string
+	Pod       *corev1.Pod
 	Namespace string
-	Pvc       *corev1.PersistentVolumeClaim
 	NodeName  string
 	Selector  string
+
+	pvc *corev1.PersistentVolumeClaim
 }
 
 // NewBackupTargetFromDeploymentName creates a BackupTarget from a namespace
@@ -54,15 +55,9 @@ func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, ku
 		return nil, fmt.Errorf("pod %s has no node", pod.Name)
 	}
 
-	pvc, err := pvcFromPod(ctx, log, kubeclient, pod)
-	if err != nil {
-		return nil, err
-	}
-
 	target := &BackupTarget{
-		PodName:   pod.Name,
+		Pod:       &pod,
 		Namespace: namespace,
-		Pvc:       pvc,
 		NodeName:  nodeName,
 		Selector:  selector,
 	}
@@ -70,40 +65,60 @@ func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, ku
 	return target, nil
 }
 
-// pvcFromPod iterates through all volumes and determines a PVC as backup
+// FindPvc iterates through all volumes and determines a PVC as backup
 // target. It is an error if there is no PVC. It is also an error if there is
 // more than one PVC.
-func pvcFromPod(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, pod corev1.Pod) (*corev1.PersistentVolumeClaim, error) {
-	pvcName := ""
-	for _, volume := range pod.Spec.Volumes {
-		if volume.PersistentVolumeClaim == nil {
-			continue
+func (t *BackupTarget) FindPvc(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) (*corev1.PersistentVolumeClaim, error) {
+	if t.pvc == nil {
+		pvcName := ""
+		for _, volume := range t.Pod.Spec.Volumes {
+			if volume.PersistentVolumeClaim == nil {
+				continue
+			}
+			if pvcName != "" {
+				return nil, fmt.Errorf("more than one PVC found")
+			}
+
+			log.Info("Found PVC", "volumeName", volume.Name)
+			pvcName = volume.PersistentVolumeClaim.ClaimName
 		}
-		if pvcName != "" {
-			return nil, fmt.Errorf("more than one PVC found")
+		if pvcName == "" {
+			return nil, fmt.Errorf("no PVC found")
 		}
 
-		log.Info("Found PVC", "volumeName", volume.Name)
-		pvcName = volume.PersistentVolumeClaim.ClaimName
-	}
-	if pvcName == "" {
-		return nil, fmt.Errorf("no PVC found")
+		// Look up the PVC
+		pvc, err := kubeclient.CoreV1().
+			PersistentVolumeClaims(t.Pod.Namespace).
+			Get(ctx, pvcName, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("error looking up PVC %s: %w", pvcName, err)
+		}
+
+		if pvc == nil {
+			return nil, fmt.Errorf("PVC %s not found", pvcName)
+		}
+
+		t.pvc = pvc
 	}
 
-	// Look up the PVC
-	pvc, err := kubeclient.CoreV1().
-		PersistentVolumeClaims(pod.Namespace).
-		Get(ctx, pvcName, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("error looking up PVC %s: %w", pvcName, err)
-	}
-
-	return pvc, nil
+	return t.pvc, nil
 }
 
 // selectorFromDeployment returns a label selector for a deployment
 func selectorFromDeployment(deployment *appsv1.Deployment) string {
 	matchLabels := deployment.Spec.Selector.MatchLabels
+	// create selector from matchLabels
+	selectors := make([]string, 0, len(matchLabels))
+	for k, v := range matchLabels {
+		selectors = append(selectors, k+"="+v)
+	}
+	selector := fmt.Sprintf("%s", strings.Join(selectors, ","))
+	return selector
+}
+
+// selectorFromStatefulSet returns a label selector for a statefulset
+func selectorFromStatefulSet(statefulSet *appsv1.StatefulSet) string {
+	matchLabels := statefulSet.Spec.Selector.MatchLabels
 	// create selector from matchLabels
 	selectors := make([]string, 0, len(matchLabels))
 	for k, v := range matchLabels {
@@ -119,4 +134,12 @@ func findDeploymentByName(ctx context.Context, kubeclient kubernetes.Interface, 
 		return nil, err
 	}
 	return deployment, nil
+}
+
+func findStatefulSetByName(ctx context.Context, kubeclient kubernetes.Interface, namespace string, name string) (*appsv1.StatefulSet, error) {
+	statefulSet, err := kubeclient.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return statefulSet, nil
 }

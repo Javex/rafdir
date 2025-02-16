@@ -78,7 +78,7 @@ func NewPvcSnapshotter(log *slog.Logger, kubeClient kubernetes.Interface, csiCli
 
 // BackupPvcFromSourcePvc takes a source PVC and provides a new PVC in the
 // target namespace that is a snapshot of the source PVC.
-func (s *PvcSnapshotter) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
+func (s *PvcSnapshotter) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *corev1.PersistentVolumeClaim, scaleUp func()) (*corev1.PersistentVolumeClaim, error) {
 	if s.sourceNamespace != "" {
 		s.log.Error("PvcSnapshotter already used, cannot use again", "sourceNamespace", s.sourceNamespace)
 		return nil, fmt.Errorf("PvcSnapshotter already used for sourceNamespace %s", s.sourceNamespace)
@@ -110,6 +110,14 @@ func (s *PvcSnapshotter) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *
 	contentHandle, err := s.snapshotHandleFromContent(ctx, sourceContentName)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to snapshotHandleFromContent: %s", err)
+	}
+
+	// This is a function that is passed in to scale up the deployment in case it
+	// was stopped. Runs after there's a handle because that indicates that the
+	// snapshot has been created and the original volume can be used again.
+	if scaleUp != nil {
+		scaleUp()
+		s.log.Debug("Scaled back up")
 	}
 
 	err = s.snapshotContentFromHandle(ctx, snapshotContentName, contentHandle, snapshotName)

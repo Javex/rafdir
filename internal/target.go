@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -16,6 +17,7 @@ type BackupTarget struct {
 	Namespace string
 	Pvc       *corev1.PersistentVolumeClaim
 	NodeName  string
+	Selector  string
 }
 
 // NewBackupTargetFromDeploymentName creates a BackupTarget from a namespace
@@ -62,6 +64,7 @@ func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, ku
 		Namespace: namespace,
 		Pvc:       pvc,
 		NodeName:  nodeName,
+		Selector:  selector,
 	}
 
 	return target, nil
@@ -102,14 +105,12 @@ func pvcFromPod(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Int
 func selectorFromDeployment(deployment *appsv1.Deployment) string {
 	matchLabels := deployment.Spec.Selector.MatchLabels
 	// create selector from matchLabels
-	selector := ""
+	selectors := make([]string, 0, len(matchLabels))
 	for k, v := range matchLabels {
-		selector += k + "=" + v + ","
+		selectors = append(selectors, k+"="+v)
 	}
-	if selector == "" {
-		return ""
-	}
-	return selector[:len(selector)-1]
+	selector := fmt.Sprintf("%s", strings.Join(selectors, ","))
+	return selector
 }
 
 func findDeploymentByName(ctx context.Context, kubeclient kubernetes.Interface, namespace string, name string) (*appsv1.Deployment, error) {

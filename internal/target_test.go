@@ -98,6 +98,7 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 					},
 				},
 				NodeName: "testNode",
+				Selector: "testKeySelector=testValueSelector",
 			},
 			"",
 		},

@@ -63,28 +63,39 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 		podName := fmt.Sprintf("%s-%s-%s", profile.Name, target.PodName, runSuffix)
 		configMapName := fmt.Sprintf("%s-%s", profile.Name, runSuffix)
 
-		// oldReplicas, err := s.ScaleTo(ctx, namespace, name, 0)
-		// if err != nil {
-		// 	log.Fatal(err)
-		// }
-		//
-		// // Ensure target is scaled back up once this function finishes
-		// defer func() {
-		// 	oldReplicas, err = s.ScaleTo(ctx, namespace, name, oldReplicas)
-		// 	if err != nil {
-		// 		log.Fatal(err)
-		// 	}
-		//
-		// 	if oldReplicas != 0 {
-		// 		return fmt.Errorf("Expected oldReplicas to be 0 but got %d", oldReplicas)
-		// 	}
-		// }()
-		//
-		// // Wait until all pods have stopped
-		// err = s.WaitStopped(ctx, namespace, selector)
-		// if err != nil {
-		// 	return fmt.Errorf("Failed WaitStopped: %s", err)
-		// }
+		var scaleUp func()
+		if profile.Stop {
+
+			oldReplicas, err := s.ScaleTo(ctx, namespace, profile.Deployment, 0)
+			if err != nil {
+				log.Error("Error scaling down deployment", "err", err)
+				return fmt.Errorf("Failed to ScaleTo: %s", err)
+			}
+
+			// Create callback to scale deployment back up once snapshot has been
+			// taken.
+			scaleUp = func() {
+				oldReplicas, err = s.ScaleTo(ctx, namespace, profile.Deployment, oldReplicas)
+				if err != nil {
+					log.Error("Failed scale replicas back up", "err", err, "deploymentName", profile.Deployment, "namespace", namespace)
+					return
+				}
+
+				if oldReplicas != 0 {
+					log.Error("Unexpected non-zero old replica count", "err", err, "deploymentName", profile.Deployment, "namespace", namespace, "oldReplicas", oldReplicas)
+					return
+				}
+			}
+
+			// Wait until all pods have stopped
+			err = s.WaitStopped(ctx, namespace, target.Selector)
+			if err != nil {
+				log.Error("Error waiting for pods to stop", "err", err, "deploymentName", profile.Deployment, "namespace", namespace)
+				return fmt.Errorf("Failed WaitStopped: %s", err)
+			}
+
+			log.Info("Deployment scaled down", "deploymentName", profile.Deployment, "namespace", namespace)
+		}
 
 		snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
 			DestNamespace: s.config.BackupNamespace,
@@ -98,7 +109,7 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) error {
 		// resources end up being created this does nothing.
 		defer snapshotter.Cleanup(ctx)
 
-		backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, target.Pvc)
+		backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, target.Pvc, scaleUp)
 		if err != nil {
 			return fmt.Errorf("Failed to BackupPvcFromSourcePvc: %s", err)
 		}

@@ -128,6 +128,10 @@ func (p Profile) Validate() error {
 		return fmt.Errorf("StdInFilename is only allowed when StdInCommand is set for profile %s", p.Name)
 	}
 
+	if len(p.Folders) > 1 {
+		return fmt.Errorf("Currently only one folder is allowed for profile %s", p.Name)
+	}
+
 	return nil
 }
 

@@ -18,7 +18,8 @@ type BackupTarget struct {
 	NodeName  string
 	Selector  string
 
-	pvc *corev1.PersistentVolumeClaim
+	pvc         *corev1.PersistentVolumeClaim
+	volumeMount *corev1.VolumeMount
 }
 
 // NewBackupTargetFromDeploymentName creates a BackupTarget from a namespace
@@ -65,25 +66,47 @@ func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, ku
 	return target, nil
 }
 
-// FindPvc iterates through all volumes and determines a PVC as backup
+// findPvcAndVolume iterates through all volumes and determines a PVC as backup
 // target. It is an error if there is no PVC. It is also an error if there is
-// more than one PVC.
-func (t *BackupTarget) FindPvc(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) (*corev1.PersistentVolumeClaim, error) {
-	if t.pvc == nil {
+// more than one PVC. Also looks up the volume mount within the container.
+func (t *BackupTarget) findPvcAndVolume(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) error {
+	if t.pvc == nil || t.volumeMount == nil {
 		pvcName := ""
+		volumeName := ""
 		for _, volume := range t.Pod.Spec.Volumes {
 			if volume.PersistentVolumeClaim == nil {
 				continue
 			}
 			if pvcName != "" {
-				return nil, fmt.Errorf("more than one PVC found")
+				return fmt.Errorf("more than one PVC found")
 			}
 
 			log.Info("Found PVC", "volumeName", volume.Name)
 			pvcName = volume.PersistentVolumeClaim.ClaimName
+			volumeName = volume.Name
 		}
 		if pvcName == "" {
-			return nil, fmt.Errorf("no PVC found")
+			return fmt.Errorf("no PVC found")
+		}
+
+		if volumeName == "" {
+			return fmt.Errorf("volume name is empty, should never happen")
+		}
+
+		// Find the mount path within the first container of the pod that matches
+		// the volume name
+	outer:
+		for _, container := range t.Pod.Spec.Containers {
+			for _, volumeMount := range container.VolumeMounts {
+				if volumeMount.Name == volumeName {
+					t.volumeMount = &volumeMount
+					break outer
+				}
+			}
+		}
+
+		if t.volumeMount == nil {
+			return fmt.Errorf("volume mount not found")
 		}
 
 		// Look up the PVC
@@ -91,17 +114,31 @@ func (t *BackupTarget) FindPvc(ctx context.Context, log *slog.Logger, kubeclient
 			PersistentVolumeClaims(t.Pod.Namespace).
 			Get(ctx, pvcName, metav1.GetOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("error looking up PVC %s: %w", pvcName, err)
-		}
-
-		if pvc == nil {
-			return nil, fmt.Errorf("PVC %s not found", pvcName)
+			return fmt.Errorf("error looking up PVC %s: %w", pvcName, err)
 		}
 
 		t.pvc = pvc
 	}
 
+	return nil
+}
+
+func (t *BackupTarget) FindPvc(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) (*corev1.PersistentVolumeClaim, error) {
+	err := t.findPvcAndVolume(ctx, log, kubeclient)
+	if err != nil {
+		return nil, err
+	}
+
 	return t.pvc, nil
+}
+
+func (t *BackupTarget) FindVolumeMount(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) (*corev1.VolumeMount, error) {
+	err := t.findPvcAndVolume(ctx, log, kubeclient)
+	if err != nil {
+		return nil, err
+	}
+
+	return t.volumeMount, nil
 }
 
 // selectorFromDeployment returns a label selector for a deployment

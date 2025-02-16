@@ -330,7 +330,7 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 	}
 }
 
-func TestFindPvc(t *testing.T) {
+func TestFindPvcAndVolumeMount(t *testing.T) {
 	type targetExpectation struct {
 		PodName   string
 		Namespace string
@@ -344,6 +344,7 @@ func TestFindPvc(t *testing.T) {
 		pods           []*corev1.Pod
 		pvcs           []*corev1.PersistentVolumeClaim
 		expPvcName     string
+		expVolumeMount *corev1.VolumeMount
 		expErrContains string
 	}{
 		{
@@ -373,6 +374,17 @@ func TestFindPvc(t *testing.T) {
 					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
+						Containers: []corev1.Container{
+							{
+								Name: "testContainer",
+								VolumeMounts: []corev1.VolumeMount{
+									{
+										Name:      "testPvc",
+										MountPath: "/test/mount/path",
+									},
+								},
+							},
+						},
 						Volumes: []corev1.Volume{
 							{
 								Name: "testPvc",
@@ -395,6 +407,10 @@ func TestFindPvc(t *testing.T) {
 				},
 			},
 			"testPvc",
+			&corev1.VolumeMount{
+				Name:      "testPvc",
+				MountPath: "/test/mount/path",
+			},
 			"",
 		},
 		{
@@ -447,6 +463,7 @@ func TestFindPvc(t *testing.T) {
 			},
 			nil,
 			"",
+			nil,
 			"more than one PVC found",
 		},
 		{
@@ -489,6 +506,7 @@ func TestFindPvc(t *testing.T) {
 			},
 			nil,
 			"",
+			nil,
 			"no PVC found",
 		},
 		{
@@ -518,6 +536,17 @@ func TestFindPvc(t *testing.T) {
 					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
+						Containers: []corev1.Container{
+							{
+								Name: "testContainer",
+								VolumeMounts: []corev1.VolumeMount{
+									{
+										Name:      "testPvc",
+										MountPath: "/test/mount/path",
+									},
+								},
+							},
+						},
 						Volumes: []corev1.Volume{
 							{
 								Name: "testPvc",
@@ -533,6 +562,7 @@ func TestFindPvc(t *testing.T) {
 			},
 			nil,
 			"",
+			nil,
 			"error looking up PVC",
 		},
 	}
@@ -602,6 +632,28 @@ func TestFindPvc(t *testing.T) {
 
 				if pvc.Name != tc.expPvcName {
 					t.Errorf("unexpected pvc name: got %q, expected %q", pvc.Name, tc.expPvcName)
+				}
+			}
+
+			volumeMount, err := target.FindVolumeMount(ctx, log, kubeclient)
+			if tc.expErrContains != "" {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tc.expErrContains) {
+					t.Errorf("expected error to contain %q, got %v", tc.expErrContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+
+				if volumeMount == nil {
+					t.Fatalf("expected volume mount, got nil")
+				}
+
+				if !cmp.Equal(volumeMount, tc.expVolumeMount) {
+					t.Errorf("unexpected difference in volume mount: %v", cmp.Diff(volumeMount, tc.expVolumeMount))
 				}
 			}
 		})

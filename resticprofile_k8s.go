@@ -112,6 +112,22 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 
 	if len(profile.Folders) > 0 {
 
+		sourcePvc, err := target.FindPvc(ctx, log, s.kubeClient)
+		if err != nil {
+			return fmt.Errorf("Failed to FindPvc: %s", err)
+		}
+
+		volumeMount, err := target.FindVolumeMount(ctx, log, s.kubeClient)
+		if err != nil {
+			return fmt.Errorf("Failed to FindVolumeMount: %s", err)
+		}
+
+		// check that mount path in volumeMount is what the profile expects to be
+		// backing up
+		if volumeMount.MountPath != profile.Folders[0] {
+			return fmt.Errorf("VolumeMount mount path %s does not match profile folder %s", volumeMount.MountPath, profile.Folders[0])
+		}
+
 		snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
 			DestNamespace: s.config.BackupNamespace,
 			RunSuffix:     runSuffix,
@@ -124,17 +140,12 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 		// resources end up being created this does nothing.
 		defer snapshotter.Cleanup(ctx)
 
-		sourcePvc, err := target.FindPvc(ctx, log, s.kubeClient)
-		if err != nil {
-			return fmt.Errorf("Failed to FindPvc: %s", err)
-		}
-
 		backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, sourcePvc, scaleUp)
 		if err != nil {
 			return fmt.Errorf("Failed to BackupPvcFromSourcePvc: %s", err)
 		}
 
-		s.AddPvcToPod(backupPod, backupPvc.Name)
+		s.AddPvcToPod(backupPod, volumeMount, backupPvc.Name)
 	}
 
 	profileConfigMap, err := profile.ToConfigMap(repos, s.config.BackupNamespace, configMapName)
@@ -371,19 +382,19 @@ func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 	return pod
 }
 
-func (s *SnapshotClient) AddPvcToPod(pod *corev1.Pod, pvcName string) {
-	pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
-		// TODO: Fix
-		Name:      "storage",
-		MountPath: "/var/lib/grafana",
-	})
+func (s *SnapshotClient) AddPvcToPod(pod *corev1.Pod, volumeMount *corev1.VolumeMount, sourcePvcName string) {
+	pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, *volumeMount)
+	// pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
+	// 	// TODO: Fix
+	// 	Name:      "storage",
+	// 	MountPath: "/var/lib/grafana",
+	// })
 
 	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-		// TODO: Fix
-		Name: "storage",
+		Name: volumeMount.Name,
 		VolumeSource: corev1.VolumeSource{
 			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-				ClaimName: pvcName,
+				ClaimName: sourcePvcName,
 			},
 		},
 	})

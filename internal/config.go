@@ -77,7 +77,7 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 		WaitTimeout:        10 * time.Second,
 		PodCreationTimeout: 1 * time.Minute,
 		PodWaitTimeout:     5 * time.Minute,
-		Image:              "ghcr.io/javex/rafdir:0.29.0",
+		Image:              "ghcr.io/javex/rafdir:latest",
 
 		Profiles:     profiles,
 		Repositories: repositories,

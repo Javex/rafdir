@@ -8,7 +8,7 @@ COPY go.mod go.sum /build/
 RUN go mod download
 COPY internal /build/internal
 COPY cmd /build/cmd
-COPY resticprofile_k8s.go /build/
+COPY rafdir.go /build/
 RUN go build \
   -o ./rafdir \
   ./cmd/rafdir/main.go

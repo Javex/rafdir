@@ -282,7 +282,6 @@ func (s *SnapshotClient) DeleteConfigMap(ctx context.Context, configMapName stri
 
 func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 	optional := false
-	var readWriteMode int32 = 0775
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
@@ -293,12 +292,11 @@ func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 			RestartPolicy:      corev1.RestartPolicyNever,
 			Containers: []corev1.Container{
 				{
-					Name:    "resticprofile",
-					Image:   s.config.Image,
-					Command: []string{"sh"},
-					Args:    []string{"/usr/local/bin/backup.sh"},
+					Name:            "resticprofile",
+					Image:           s.config.Image,
+					ImagePullPolicy: corev1.PullAlways,
+					Command:         []string{"/usr/bin/rafdir-backup"},
 					VolumeMounts: []corev1.VolumeMount{
-						{Name: "restic-script", MountPath: "/usr/local/bin"},
 						{Name: "restic-cache", MountPath: "/var/cache/restic"},
 						{Name: "nfs-restic-repo", MountPath: "/mnt/kubernetes-restic"},
 					},
@@ -347,17 +345,6 @@ func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 			// End Containers
 
 			Volumes: []corev1.Volume{
-				{
-					Name: "restic-script",
-					VolumeSource: corev1.VolumeSource{
-						ConfigMap: &corev1.ConfigMapVolumeSource{
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: "rafdir-script",
-							},
-							DefaultMode: &readWriteMode,
-						},
-					},
-				},
 				{
 					Name: "restic-cache",
 					VolumeSource: corev1.VolumeSource{

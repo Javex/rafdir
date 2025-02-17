@@ -1,19 +1,3 @@
-backup_script: |
-
-  #!/bin/bash
-
-  # Exit on error, undefined variable and command pipe failures
-  set -eu -o pipefail
-
-  for profile_path in /etc/restic/profiles.d/*.toml; do
-      profile_basename=$(basename "${profile_path}");
-      profile_name="${profile_basename%.*}";
-      if [ "${profile_name}" = '*' ]; then
-          exit;
-      fi
-      /usr/bin/resticprofile --no-prio --no-ansi --config /etc/restic/profiles.yaml --name $profile_name backup;
-  done
-
 configuration: |
   version: "1"
   includes:

@@ -12,6 +12,9 @@ COPY rafdir.go /build/
 RUN go build \
   -o ./rafdir \
   ./cmd/rafdir/main.go
+RUN go build \
+  -o ./rafdir-backup \
+  ./cmd/backup/main.go
 
 FROM alpine:latest
 
@@ -26,5 +29,6 @@ ENV TZ=Etc/UTC
 COPY --from=resticprofile /usr/bin/restic /usr/bin/restic
 COPY --from=resticprofile /usr/bin/resticprofile /usr/bin/resticprofile
 COPY --from=builder /build/rafdir /usr/bin/rafdir
+COPY --from=builder /build/rafdir-backup /usr/bin/rafdir-backup
 
 ENTRYPOINT ["rafdir"]

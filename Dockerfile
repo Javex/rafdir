@@ -7,9 +7,11 @@ WORKDIR /build
 COPY go.mod go.sum /build/
 RUN go mod download
 COPY internal /build/internal
-COPY cli /build/cli
+COPY cmd /build/cmd
 COPY resticprofile_k8s.go /build/
-RUN go build -o ./cli/resticprofile-kubernetes ./cli/resticprofile-kubernetes.go
+RUN go build \
+  -o ./resticprofile-kubernetes \
+  ./cmd/resticprofile-kubernetes/main.go
 
 FROM alpine:latest
 
@@ -23,6 +25,6 @@ ENV TZ=Etc/UTC
 
 COPY --from=resticprofile /usr/bin/restic /usr/bin/restic
 COPY --from=resticprofile /usr/bin/resticprofile /usr/bin/resticprofile
-COPY --from=builder /build/cli/resticprofile-kubernetes /usr/bin/resticprofile-kubernetes
+COPY --from=builder /build/resticprofile-kubernetes /usr/bin/resticprofile-kubernetes
 
 ENTRYPOINT ["resticprofile-kubernetes"]

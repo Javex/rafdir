@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    {{- include "rafdir.labels" . | nindent 4 }}
+  name: {{ include "rafdir.name" . }}-script
+data:
+  backup.sh: |
+    {{- .Values.backup_script | nindent 4 }}

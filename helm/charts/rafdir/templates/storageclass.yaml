@@ -1,9 +1,9 @@
 kind: StorageClass
 apiVersion: storage.k8s.io/v1
 metadata:
-  name: {{ include "resticprofile-kubernetes.name" . }}
+  name: {{ include "rafdir.name" . }}
   labels:
-    {{- include "resticprofile-kubernetes.labels" . | nindent 4}}
+    {{- include "rafdir.labels" . | nindent 4}}
 provisioner: driver.longhorn.io
 allowVolumeExpansion: false
 reclaimPolicy: Delete

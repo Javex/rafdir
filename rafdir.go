@@ -1,10 +1,10 @@
-package resticprofilek8s
+package rafdir
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"resticprofilek8s/internal"
+	"rafdir/internal"
 	"time"
 
 	// apiv1 "k8s.io/api/core/v1"
@@ -309,7 +309,7 @@ func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 							ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "resticprofile-kubernetes",
+										Name: "rafdir",
 									},
 									Key:      "backblaze-key-id",
 									Optional: &optional,
@@ -321,7 +321,7 @@ func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 							ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "resticprofile-kubernetes",
+										Name: "rafdir",
 									},
 									Key:      "backblaze-application-key",
 									Optional: &optional,
@@ -333,7 +333,7 @@ func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 							ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "resticprofile-kubernetes",
+										Name: "rafdir",
 									},
 									Key:      "restic-repo-password",
 									Optional: &optional,
@@ -352,7 +352,7 @@ func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 					VolumeSource: corev1.VolumeSource{
 						ConfigMap: &corev1.ConfigMapVolumeSource{
 							LocalObjectReference: corev1.LocalObjectReference{
-								Name: "resticprofile-kubernetes-script",
+								Name: "rafdir-script",
 							},
 							DefaultMode: &readWriteMode,
 						},

@@ -1,7 +1,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "resticprofile-kubernetes.name" -}}
+{{- define "rafdir.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
@@ -10,7 +10,7 @@ Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 If release name contains chart name it will be used as a full name.
 */}}
-{{- define "resticprofile-kubernetes.fullname" -}}
+{{- define "rafdir.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -26,16 +26,16 @@ If release name contains chart name it will be used as a full name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "resticprofile-kubernetes.chart" -}}
+{{- define "rafdir.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "resticprofile-kubernetes.labels" -}}
-helm.sh/chart: {{ include "resticprofile-kubernetes.chart" . }}
-{{ include "resticprofile-kubernetes.selectorLabels" . }}
+{{- define "rafdir.labels" -}}
+helm.sh/chart: {{ include "rafdir.chart" . }}
+{{ include "rafdir.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -45,7 +45,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "resticprofile-kubernetes.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "resticprofile-kubernetes.name" . }}
+{{- define "rafdir.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "rafdir.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}

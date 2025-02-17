@@ -3,7 +3,7 @@ package internal_test
 import (
 	"context"
 	"log/slog"
-	"resticprofilek8s/internal"
+	"rafdir/internal"
 	"strings"
 	"testing"
 

@@ -1,9 +1,9 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "resticprofile-kubernetes.name" . }}
+  name: {{ include "rafdir.name" . }}
   labels:
-    {{- include "resticprofile-kubernetes.labels" . | nindent 4 }}
+    {{- include "rafdir.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
@@ -15,14 +15,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "resticprofile-kubernetes.name" . }}
+  name: {{ include "rafdir.name" . }}
   labels:
-    {{- include "resticprofile-kubernetes.labels" . | nindent 4 }}
+    {{- include "rafdir.labels" . | nindent 4 }}
 roleRef:
   kind: ClusterRole
-  name: {{ include "resticprofile-kubernetes.name" . }}
+  name: {{ include "rafdir.name" . }}
   apiGroup: rbac.authorization.k8s.io
 subjects:
   - kind: ServiceAccount
-    name: {{ include "resticprofile-kubernetes.name" . }}
+    name: {{ include "rafdir.name" . }}
     namespace: {{ .Release.Namespace }}

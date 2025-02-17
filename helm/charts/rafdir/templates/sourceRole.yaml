@@ -5,10 +5,10 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "resticprofile-kubernetes.name" $root }}-{{ $profileName }}
+  name: {{ include "rafdir.name" $root }}-{{ $profileName }}
   namespace: {{ $profile.namespace }}
   labels:
-    {{- include "resticprofile-kubernetes.labels" $root | nindent 4 }}
+    {{- include "rafdir.labels" $root | nindent 4 }}
 rules:
   - apiGroups:
       - ""
@@ -44,17 +44,17 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "resticprofile-kubernetes.name" $root }}-{{ $profileName }}
+  name: {{ include "rafdir.name" $root }}-{{ $profileName }}
   namespace: {{ $profile.namespace }}
   labels:
-    {{- include "resticprofile-kubernetes.labels" $root | nindent 4 }}
+    {{- include "rafdir.labels" $root | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ include "resticprofile-kubernetes.name" $root }}-{{ $profileName }}
+  name: {{ include "rafdir.name" $root }}-{{ $profileName }}
 subjects:
   - kind: ServiceAccount
-    name: {{ include "resticprofile-kubernetes.name" $root }}
+    name: {{ include "rafdir.name" $root }}
     namespace: {{ $root.Release.Namespace }}
 ---
 {{- end }}

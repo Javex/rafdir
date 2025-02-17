@@ -1,4 +1,4 @@
-# resticprofile-kubernetes
+# rafdir
 
 This application creates backups using resticprofile on Kubernetes. It does
 this by creating a separate namespace to deploy all resources in. At backup
@@ -23,7 +23,7 @@ the values as needed. Lots of specific assumptions at the moment.
 Then install the Helm chart:
 
 ```bash
-helm upgrade --install --namespace backup resticprofile-kubernetes ./helm/charts/resticprofile-kubernetes -f secrets.yaml -f values.yaml
+helm upgrade --install --namespace backup rafdir ./helm/charts/rafdir -f secrets.yaml -f values.yaml
 ````
 
 This creates the resources, e.g. service account, role, etc. so that the backup
@@ -41,7 +41,7 @@ If you install the Helm chart and then run the application locally, you can
 test pretty easily:
 
 ```
-go run ./cli/resticprofile-kubernetes.go
+go run ./cmd/rafdir.go
 ```
 
 Make sure you have a `KUBECONFIG` env var set up.
@@ -64,3 +64,8 @@ namespaces that are backed up don't need access to the repo password. By
 leveraging some snapshot magic it's possible to achieve that but k8up doesn't
 have support for snapshots at the moment and even if it did, it's designed for
 in-namepsace backups.
+
+### Why the name?
+
+I needed something short and snappy. According to ChatGPT it's a combination of
+old Norse words "ráðfǫrr". It was good enough.

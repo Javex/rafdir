@@ -2,8 +2,8 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   labels:
-    {{- include "resticprofile-kubernetes.labels" . | nindent 4 }}
-  name: {{ include "resticprofile-kubernetes.name" . }}-config
+    {{- include "rafdir.labels" . | nindent 4 }}
+  name: {{ include "rafdir.name" . }}-config
 data:
   profiles.yaml: |
     {{- index .Values.configuration | nindent 4 }}

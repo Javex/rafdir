@@ -1,7 +1,7 @@
 package internal_test
 
 import (
-	"resticprofilek8s/internal"
+	"rafdir/internal"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"

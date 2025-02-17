@@ -1,0 +1,19 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "rafdir.name" . }}
+  labels:
+    {{- include "rafdir.labels" . | nindent 4}}
+spec:
+  # Cron schedule that runs once a day
+  schedule: "0 0 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: {{ include "rafdir.name" . }}
+          containers:
+          - name: rafdir
+            image: "ghcr.io/javex/rafdir:latest"
+            imagePullPolicy: Always
+          restartPolicy: Never

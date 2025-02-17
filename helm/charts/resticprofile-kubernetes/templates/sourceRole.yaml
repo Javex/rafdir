@@ -26,6 +26,11 @@ rules:
     verbs:
       - get
       - list
+  {{- if $profile.stop }}
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "update"]
+  {{- end }}
   - apiGroups:
       - "snapshot.storage.k8s.io"
     resources:

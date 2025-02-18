@@ -1,4 +1,4 @@
-package exec
+package backup
 
 import (
 	"os"
@@ -40,7 +40,8 @@ func TestListProfiles(t *testing.T) {
 					t.Fatalf("could not create file %s: %v", f, err)
 				}
 			}
-			actual, err := listProfiles(tmpDir)
+			b := Backup{ProfilePath: tmpDir}
+			actual, err := b.listProfiles()
 			if err != nil {
 				t.Fatalf("could not list profiles: %v", err)
 			}

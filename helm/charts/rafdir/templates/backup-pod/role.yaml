@@ -1,0 +1,35 @@
+# This file contains a Role & RoleBinding for each namespace that the backup
+# pod should run commands in to take command-based backups.
+{{- $root := . }}
+{{- range $profileName, $profile := .Values.profiles }}
+{{- if (index $profile "stdin-command") }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "rafdir.name" $root }}-{{ $profileName }}-backup
+  namespace: {{ $profile.namespace }}
+  labels:
+    {{- include "rafdir.labels" $root | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "rafdir.name" $root }}-{{ $profileName }}-backup
+  namespace: {{ $profile.namespace }}
+  labels:
+    {{- include "rafdir.labels" $root | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "rafdir.name" $root }}-{{ $profileName }}-backup
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "rafdir.name" $root }}-backup
+    namespace: {{ $root.Release.Namespace }}
+---
+{{- end }}
+{{- end }}

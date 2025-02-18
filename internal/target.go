@@ -26,6 +26,14 @@ type BackupTarget struct {
 // and a deployment name. It finds the deployment, then the pod, then the PVC
 // and the node name the pod is running on.
 func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, namespace string, deploymentName string) (*BackupTarget, error) {
+	if deploymentName == "" {
+		return nil, fmt.Errorf("deploymentName cannot be empty")
+	}
+
+	if namespace == "" {
+		return nil, fmt.Errorf("namespace cannot be empty")
+	}
+
 	deployment, err := findDeploymentByName(ctx, kubeclient, namespace, deploymentName)
 	if err != nil {
 		return nil, err
@@ -36,6 +44,32 @@ func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, ku
 		return nil, fmt.Errorf("selector not found for deployment %s", deploymentName)
 	}
 
+	return backupTargetFromSelector(ctx, kubeclient, namespace, selector)
+}
+
+func NewBackupTargetFromStatefulSetName(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, namespace, statefulSetName string) (*BackupTarget, error) {
+	if statefulSetName == "" {
+		return nil, fmt.Errorf("statefulSetName cannot be empty")
+	}
+
+	if namespace == "" {
+		return nil, fmt.Errorf("namespace cannot be empty")
+	}
+
+	statefulSet, err := findStatefulSetByName(ctx, kubeclient, namespace, statefulSetName)
+	if err != nil {
+		return nil, err
+	}
+
+	selector := selectorFromStatefulSet(statefulSet)
+	if selector == "" {
+		return nil, fmt.Errorf("selector not found for statefulSet %s", statefulSetName)
+	}
+
+	return backupTargetFromSelector(ctx, kubeclient, namespace, selector)
+}
+
+func backupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Interface, namespace, selector string) (*BackupTarget, error) {
 	podList, err := kubeclient.CoreV1().
 		Pods(namespace).
 		List(ctx, metav1.ListOptions{
@@ -62,7 +96,6 @@ func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, ku
 		NodeName:  nodeName,
 		Selector:  selector,
 	}
-
 	return target, nil
 }
 

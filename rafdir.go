@@ -54,6 +54,8 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) []error {
 			errors = append(errors, err)
 		}
 	}
+
+	log.Info("Backup run finished")
 	return errors
 }
 
@@ -66,7 +68,7 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 	config := s.config
 	repos := config.Repositories
 	namespace := profile.Namespace
-	target, err := internal.NewBackupTargetFromDeploymentName(ctx, log, s.kubeClient, namespace, profile.Deployment)
+	target, err := profile.BackupTarget(ctx, log, s.kubeClient)
 	if err != nil {
 		return fmt.Errorf("Failed to NewBackupTargetFromDeploymentName: %s", err)
 	}
@@ -109,6 +111,10 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 	}
 
 	backupPod := s.NewBackupPod(podName)
+
+	if profile.StdInCommand != "" {
+		AddStdInCommandArgs(backupPod, profile, target.Pod.Name)
+	}
 
 	if len(profile.Folders) > 0 {
 
@@ -170,9 +176,9 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 	return nil
 }
 
-func GetK8sConfig(kubeconfig *string) (*rest.Config, error) {
+func GetK8sConfig(kubeconfig string) (*rest.Config, error) {
 	// Build the config from the kubeconfig file
-	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build kubeconfig: %w", err)
 	}
@@ -288,8 +294,7 @@ func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 			Namespace: s.config.BackupNamespace,
 		},
 		Spec: corev1.PodSpec{
-			ServiceAccountName: "restic",
-			RestartPolicy:      corev1.RestartPolicyNever,
+			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{
 				{
 					Name:            "resticprofile",
@@ -367,6 +372,18 @@ func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 	}
 
 	return pod
+}
+
+func AddStdInCommandArgs(pod *corev1.Pod, profile *internal.Profile, stdinPod string) {
+	pod.Spec.ServiceAccountName = "rafdir-backup"
+	pod.Spec.Containers[0].Args = []string{
+		"--stdin-pod",
+		stdinPod,
+		"--stdin-namespace",
+		profile.Namespace,
+		"--stdin-command",
+		profile.StdInCommand,
+	}
 }
 
 func (s *SnapshotClient) AddPvcToPod(pod *corev1.Pod, volumeMount *corev1.VolumeMount, sourcePvcName string) {

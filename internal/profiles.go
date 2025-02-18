@@ -2,12 +2,14 @@ package internal
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
 	"text/template"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
 )
 
@@ -180,4 +182,22 @@ func (p Profile) ToConfigMap(repos []Repository, backupNamespace string, cmName 
 	}
 
 	return cm, nil
+}
+
+func (p Profile) BackupTarget(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) (*BackupTarget, error) {
+	var target *BackupTarget
+	var err error
+
+	if p.Deployment != "" {
+		target, err = NewBackupTargetFromDeploymentName(ctx, log, kubeclient, p.Namespace, p.Deployment)
+	} else {
+		target, err = NewBackupTargetFromStatefulSetName(ctx, log, kubeclient, p.Namespace, p.StatefulSet)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return target, nil
+
 }

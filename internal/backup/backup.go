@@ -93,13 +93,18 @@ func (b *Backup) Run() []error {
 	}
 
 	errs := make([]error, 0)
-	stdoutReader := bytes.NewReader(stdout.Bytes())
+	var stdoutReader *bytes.Reader
+	if stdout != nil {
+		stdoutReader = bytes.NewReader(stdout.Bytes())
+	}
 	for _, profile := range profiles {
 		log = log.With("profile", profile)
 		log.Info("Starting backup")
 
-		// Reset the reader to the beginning of the buffer
-		stdoutReader.Seek(0, 0)
+		if stdoutReader != nil {
+			// Reset the reader to the beginning of the buffer
+			stdoutReader.Seek(0, 0)
+		}
 
 		// Execute the profile
 		err = b.runResticprofile(profile, stdoutReader)

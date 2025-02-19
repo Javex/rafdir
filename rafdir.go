@@ -171,12 +171,15 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 	if err != nil {
 		return fmt.Errorf("Failed to CreateBackupPod: %s", err)
 	}
-	defer s.DeletePod(ctx, podName)
 
 	err = s.WaitPod(ctx, podName)
 	if err != nil {
 		return fmt.Errorf("Failed to WaitPod: %s", err)
 	}
+
+	// Only delete pod if the backup was successful, otherwise leave it for
+	// debugging
+	s.DeletePod(ctx, podName)
 
 	return nil
 }

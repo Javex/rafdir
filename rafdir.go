@@ -308,7 +308,7 @@ func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 					Command:         []string{"/usr/bin/rafdir-backup"},
 					VolumeMounts: []corev1.VolumeMount{
 						{Name: "restic-cache", MountPath: "/var/cache/restic"},
-						{Name: "nfs-restic-repo", MountPath: "/mnt/kubernetes-restic"},
+						{Name: "nfs-restic-repo", MountPath: "/mnt/restic-repo"},
 					},
 
 					Env: []corev1.EnvVar{
@@ -366,7 +366,7 @@ func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
 					VolumeSource: corev1.VolumeSource{
 						NFS: &corev1.NFSVolumeSource{
 							Server: "10.0.20.10",
-							Path:   "/mnt/kubernetes-restic",
+							Path:   "/mnt/restic-repo",
 						},
 					},
 				},

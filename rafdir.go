@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"rafdir/internal"
 	"time"
 
@@ -64,7 +65,7 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 	// Suffix to apply to all resources managed by this run. Existing resources
 	// will be skipped to create an idempotent run. Resources will be deleted
 	// when they are no longer needed.
-	runSuffix := "testing"
+	runSuffix := generateRunSuffix()
 	config := s.config
 	repos := config.Repositories
 	namespace := profile.Namespace
@@ -549,4 +550,17 @@ func (s *SnapshotClient) DeletePod(ctx context.Context, podName string) error {
 	}
 	log.Info("Pod deleted")
 	return nil
+}
+
+const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+var seededRand *rand.Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+func generateRunSuffix() string {
+	length := 6
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[seededRand.Intn(len(charset))]
+	}
+	return string(b)
 }

@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"os/signal"
 	"rafdir/internal"
 	"rafdir/internal/cli"
 	"strings"
+	"syscall"
 	"time"
 
 	// apiv1 "k8s.io/api/core/v1"
@@ -149,6 +151,19 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context, profileFilter string) [
 
 func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Profile, baseProfile string) error {
 	log := s.log.With("profile", profile.Name)
+
+	// Handle keyboard interrupts and SIGTERM and perform cleanup on any interruption
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	var cleanup []func()
+	defer func() {
+		log.Info("Cleaning up resources")
+
+		for _, f := range cleanup {
+			f()
+		}
+	}()
+
 	// Suffix to apply to all resources managed by this run. Existing resources
 	// will be skipped to create an idempotent run. Resources will be deleted
 	// when they are no longer needed.
@@ -232,7 +247,7 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 		})
 		// Schedule cleanup before kicking off the resource creation. If no
 		// resources end up being created this does nothing.
-		defer snapshotter.Cleanup(ctx)
+		cleanup = append(cleanup, func() { snapshotter.Cleanup(ctx) })
 
 		backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, sourcePvc, scaleUp)
 		if err != nil {
@@ -252,7 +267,7 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 	if err != nil {
 		return fmt.Errorf("Failed to CreateConfigMap: %s", err)
 	}
-	defer s.DeleteConfigMap(ctx, profileConfigMap.Name)
+	cleanup = append(cleanup, func() { s.DeleteConfigMap(context.Background(), profileConfigMap.Name) })
 
 	err = s.CreateBackupPod(ctx, profileConfigMap, backupPod)
 	if err != nil {

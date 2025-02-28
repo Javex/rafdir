@@ -34,16 +34,16 @@ type Config struct {
 	Repositories []Repository
 }
 
-func LoadConfigFromKubernetes(ctx context.Context, log *slog.Logger, kubeClient kubernetes.Interface, namespace string, configMapName string) (*Config, error) {
+func LoadConfigFromKubernetes(ctx context.Context, log *slog.Logger, kubeClient kubernetes.Interface, namespace string, configMapName string, profileFilter string) (*Config, error) {
 	cm, err := kubeClient.CoreV1().ConfigMaps(namespace).Get(ctx, configMapName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get global configmap %s: %w", configMapName, err)
 	}
 	log.Info("Loaded global ConfigMap")
-	return NewConfigFromConfigMap(log, namespace, cm)
+	return NewConfigFromConfigMap(log, namespace, cm, profileFilter)
 }
 
-func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap *corev1.ConfigMap) (*Config, error) {
+func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap *corev1.ConfigMap, profileFilter string) (*Config, error) {
 	globalConfigFile, ok := configMap.Data["profiles.yaml"]
 	if !ok {
 		return nil, fmt.Errorf("ConfigMap %s has no key `profiles.yaml`", configMap.Name)
@@ -55,7 +55,7 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 	}
 	log.Info("Loaded repositories")
 
-	profiles, errs := ProfilesFromGlobalConfigMap(configMap)
+	profiles, errs := ProfilesFromGlobalConfigMap(configMap, profileFilter)
 	if len(errs) > 0 {
 		log.Warn("There were errors when loading profiles", "errors", errs)
 	}

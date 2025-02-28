@@ -22,7 +22,7 @@ func rootRun(clientConfig *rafdir.SnapshotClientConfig) error {
 	if err != nil {
 		return fmt.Errorf("Failed to create client: %s", err)
 	}
-	errs := client.TakeBackup(ctx, clientConfig.ProfileFilter)
+	errs := client.TakeBackup(ctx)
 	if len(errs) > 0 {
 		var errMsgs []string
 		for _, err := range errs {

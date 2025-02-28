@@ -52,7 +52,7 @@ type Profile struct {
 	Name string
 }
 
-func ProfilesFromGlobalConfigMap(globalConfigMap *corev1.ConfigMap) (map[string]Profile, []error) {
+func ProfilesFromGlobalConfigMap(globalConfigMap *corev1.ConfigMap, profileFilter string) (map[string]Profile, []error) {
 	if globalConfigMap.Data == nil {
 		return nil, []error{fmt.Errorf("ConfigMap %s has no data", globalConfigMap.Name)}
 	}
@@ -66,10 +66,10 @@ func ProfilesFromGlobalConfigMap(globalConfigMap *corev1.ConfigMap) (map[string]
 		return nil, []error{fmt.Errorf("ConfigMap %s has empty key `profiles`", globalConfigMap.Name)}
 	}
 
-	return ProfilesFromYamlString(profilesString)
+	return ProfilesFromYamlString(profilesString, profileFilter)
 }
 
-func ProfilesFromYamlString(profilesString string) (map[string]Profile, []error) {
+func ProfilesFromYamlString(profilesString string, profileFilter string) (map[string]Profile, []error) {
 	log := slog.Default()
 	profiles := make(map[string]Profile)
 
@@ -81,6 +81,12 @@ func ProfilesFromYamlString(profilesString string) (map[string]Profile, []error)
 
 	errs := make([]error, 0)
 	for profileName := range profiles {
+		if profileFilter != "" && profileName != profileFilter {
+			log.Info("Skipping profile due to filter", "profile", profileName, "profileFilter", profileFilter)
+			delete(profiles, profileName)
+			continue
+		}
+
 		profile := profiles[profileName]
 		profile.Name = profileName
 
@@ -90,7 +96,9 @@ func ProfilesFromYamlString(profilesString string) (map[string]Profile, []error)
 			log.Error("Error validating profile, skipping.", "profile", profileName, "err", err)
 			errs = append(errs, fmt.Errorf("Error validating profile %s: %w", profileName, err))
 			delete(profiles, profileName)
-		} else if profile.Disabled {
+		} else if profile.Disabled && profileFilter == "" {
+			// If a profile filter is set, don't skip disabled profile, assume it was
+			// done on purpose.
 			log.Info("Profile is disabled, skipping.", "profile", profileName)
 			delete(profiles, profileName)
 		} else {

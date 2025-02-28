@@ -13,6 +13,7 @@ func TestProfilesFromYaml(t *testing.T) {
 	tcs := []struct {
 		name          string
 		profileString string
+		profileFilter string
 		expProfile    map[string]internal.Profile
 	}{
 		{
@@ -26,6 +27,7 @@ func TestProfilesFromYaml(t *testing.T) {
           folders:
             - /test/folder
       `,
+			"",
 
 			map[string]internal.Profile{
 				"test": {
@@ -50,6 +52,7 @@ func TestProfilesFromYaml(t *testing.T) {
           folders:
             - /test/folder
       `,
+			"",
 
 			map[string]internal.Profile{
 				"test": {
@@ -72,6 +75,7 @@ func TestProfilesFromYaml(t *testing.T) {
           host: test.example.com
           stdin-command: "test command"
       `,
+			"",
 
 			map[string]internal.Profile{
 				"test": {
@@ -94,6 +98,85 @@ func TestProfilesFromYaml(t *testing.T) {
           host: test.example.com
           stdin-command: "test command"
       `,
+			"",
+			map[string]internal.Profile{},
+		},
+		{
+			"filterMatch",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          folders:
+            - /test/folder
+      `,
+			"test",
+
+			map[string]internal.Profile{
+				"test": {
+					Name:       "test",
+					Namespace:  "testNamespace",
+					Deployment: "testDeployment",
+					Stop:       false,
+					Host:       "test.example.com",
+					Folders:    []string{"/test/folder"},
+				},
+			},
+		},
+		{
+			"filterNoMatch",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          folders:
+            - /test/folder
+      `,
+			"otherFilter",
+
+			map[string]internal.Profile{},
+		},
+		{
+			"filterMatchDisabled",
+			`
+        test:
+          disabled: true
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          folders:
+            - /test/folder
+      `,
+			"test",
+
+			map[string]internal.Profile{
+				"test": {
+					Disabled:   true,
+					Name:       "test",
+					Namespace:  "testNamespace",
+					Deployment: "testDeployment",
+					Stop:       false,
+					Host:       "test.example.com",
+					Folders:    []string{"/test/folder"},
+				},
+			},
+		},
+		{
+			"invalidButFiltered",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+      `,
+			"otherFilter",
+
 			map[string]internal.Profile{},
 		},
 	}
@@ -101,7 +184,7 @@ func TestProfilesFromYaml(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
 
-			profiles, errs := internal.ProfilesFromYamlString(tc.profileString)
+			profiles, errs := internal.ProfilesFromYamlString(tc.profileString, tc.profileFilter)
 			if len(errs) > 0 {
 				t.Fatalf("Error parsing yaml: %v", errs)
 			}
@@ -133,7 +216,7 @@ func TestProfilesFromYamlErrors(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			res, errs := internal.ProfilesFromYamlString(tc.profileString)
+			res, errs := internal.ProfilesFromYamlString(tc.profileString, "")
 			if len(errs) == 0 {
 				t.Fatalf("Expected an error, but got nil")
 			}

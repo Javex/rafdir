@@ -89,6 +89,7 @@ func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, erro
 		kubeClient,
 		s.Namespace,
 		s.ConfigMapName,
+		s.ProfileFilter,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to load global configmap: %s", err)
@@ -122,7 +123,7 @@ func NewClient(log *slog.Logger, kubeClient kubernetes.Interface, csiClient csiC
 	return &client, nil
 }
 
-func (s *SnapshotClient) TakeBackup(ctx context.Context, profileFilter string) []error {
+func (s *SnapshotClient) TakeBackup(ctx context.Context) []error {
 	log := s.log
 	log.Info("Starting backup run")
 	config := s.config
@@ -135,10 +136,6 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context, profileFilter string) [
 
 	errors := make([]error, 0)
 	for _, profile := range profiles {
-		if profileFilter != "" && profile.Name != profileFilter {
-			log.Info("Skipping profile due to filter", "profile", profile.Name, "profileFilter", profileFilter)
-			continue
-		}
 		err = s.profileBackup(ctx, &profile, baseProfile)
 		if err != nil {
 			errors = append(errors, err)

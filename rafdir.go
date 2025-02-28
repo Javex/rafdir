@@ -26,6 +26,7 @@ type SnapshotClientConfig struct {
 	Namespace     string
 	ConfigMapName string
 	LogLevel      string
+	ProfileFilter string
 }
 
 func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, error) {
@@ -119,7 +120,7 @@ func NewClient(log *slog.Logger, kubeClient kubernetes.Interface, csiClient csiC
 	return &client, nil
 }
 
-func (s *SnapshotClient) TakeBackup(ctx context.Context) []error {
+func (s *SnapshotClient) TakeBackup(ctx context.Context, profileFilter string) []error {
 	log := s.log
 	log.Info("Starting backup run")
 	config := s.config
@@ -132,6 +133,10 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) []error {
 
 	errors := make([]error, 0)
 	for _, profile := range profiles {
+		if profileFilter != "" && profile.Name != profileFilter {
+			log.Info("Skipping profile due to filter", "profile", profile.Name, "profileFilter", profileFilter)
+			continue
+		}
 		err = s.profileBackup(ctx, &profile, baseProfile)
 		if err != nil {
 			errors = append(errors, err)

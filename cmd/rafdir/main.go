@@ -13,6 +13,7 @@ func addFlags(cmd *cobra.Command, clientConfig *rafdir.SnapshotClientConfig) {
 	cmd.Flags().StringVarP(&clientConfig.Namespace, "namespace", "n", "backup", "Namespace from which backups will be orchestrated and run in")
 	cmd.Flags().StringVarP(&clientConfig.ConfigMapName, "config-map-name", "c", "rafdir-config", "Name of ConfigMap that contains main backup config")
 	cmd.Flags().StringVarP(&clientConfig.LogLevel, "log-level", "l", "INFO", "Log level, case-insensitive. Accepts debug, info, warn and error.")
+	cmd.Flags().StringVarP(&clientConfig.ProfileFilter, "profile", "p", "", "Only back up a single profile. By default all profiles are updated. Value must be the name of a profile in the ConfigMap")
 }
 
 func rootRun(clientConfig *rafdir.SnapshotClientConfig) error {
@@ -21,7 +22,7 @@ func rootRun(clientConfig *rafdir.SnapshotClientConfig) error {
 	if err != nil {
 		return fmt.Errorf("Failed to create client: %s", err)
 	}
-	errs := client.TakeBackup(ctx)
+	errs := client.TakeBackup(ctx, clientConfig.ProfileFilter)
 	if len(errs) > 0 {
 		var errMsgs []string
 		for _, err := range errs {

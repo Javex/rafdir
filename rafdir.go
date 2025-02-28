@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"os"
 	"rafdir/internal"
 	"rafdir/internal/cli"
+	"strings"
 	"time"
 
 	// apiv1 "k8s.io/api/core/v1"
@@ -23,11 +25,27 @@ import (
 type SnapshotClientConfig struct {
 	Namespace     string
 	ConfigMapName string
+	LogLevel      string
 }
 
 func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, error) {
 	var kubeClient *kubernetes.Clientset
 	var csiClient *csiClientset.Clientset
+
+	var logLevel slog.Level
+	switch l := strings.ToLower(s.LogLevel); l {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "info":
+		logLevel = slog.LevelInfo
+	case "warn":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		return nil, fmt.Errorf("Invalid log level %s", s.LogLevel)
+	}
+	cli.InitLogging(logLevel)
 
 	log := slog.Default()
 
@@ -41,7 +59,11 @@ func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, erro
 			return nil, fmt.Errorf("Failed to create csi client: %s", err)
 		}
 	} else {
-		kubeconfig := cli.GetKubeconfig()
+		kubeconfig := os.Getenv("KUBECONFIG")
+		if kubeconfig == "" {
+			return nil, fmt.Errorf("Missing env var KUBECONFIG")
+		}
+
 		cfg, err := GetK8sConfig(kubeconfig)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to get k8s config: %s", err)

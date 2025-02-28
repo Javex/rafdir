@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"rafdir"
 	"strings"
@@ -15,7 +16,7 @@ import (
 )
 
 func rootRun(backup *backup.Backup) error {
-	cli.InitLogging()
+	cli.InitLogging(slog.LevelDebug)
 
 	errs := backup.Run()
 	if len(errs) > 0 {

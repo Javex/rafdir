@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"rafdir/internal"
+	"rafdir/internal/cli"
 	"time"
 
 	// apiv1 "k8s.io/api/core/v1"
@@ -18,6 +19,65 @@ import (
 
 	csiClientset "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned"
 )
+
+type SnapshotClientConfig struct {
+	Namespace     string
+	ConfigMapName string
+}
+
+func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, error) {
+	var kubeClient *kubernetes.Clientset
+	var csiClient *csiClientset.Clientset
+
+	log := slog.Default()
+
+	if cfg, err := rest.InClusterConfig(); err == nil {
+		kubeClient, err = InitK8sClient(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to create k8s client: %s", err)
+		}
+		csiClient, err = InitCSIClient(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to create csi client: %s", err)
+		}
+	} else {
+		kubeconfig := cli.GetKubeconfig()
+		cfg, err := GetK8sConfig(kubeconfig)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to get k8s config: %s", err)
+		}
+
+		kubeClient, err = InitK8sClient(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to create k8s client: %s", err)
+		}
+
+		csiClient, err = InitCSIClient(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to create csi client: %s", err)
+		}
+	}
+
+	config, err := internal.LoadConfigFromKubernetes(
+		ctx,
+		log,
+		kubeClient,
+		s.Namespace,
+		s.ConfigMapName,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to load global configmap: %s", err)
+	}
+
+	client, err := NewClient(
+		log,
+		kubeClient,
+		csiClient,
+		config,
+	)
+
+	return client, err
+}
 
 type SnapshotClient struct {
 	kubeClient kubernetes.Interface

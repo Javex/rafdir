@@ -90,16 +90,19 @@ func ProfilesFromYamlString(profilesString string, profileFilter string) (map[st
 		profile := profiles[profileName]
 		profile.Name = profileName
 
+		// If a profile filter is set, don't skip disabled profile, assume it was
+		// done on purpose.
+		if profile.Disabled && profileFilter == "" {
+			log.Info("Profile is disabled, skipping.", "profile", profileName)
+			delete(profiles, profileName)
+			continue
+		}
+
 		// Validate the profile
 		err := profile.Validate()
 		if err != nil {
 			log.Error("Error validating profile, skipping.", "profile", profileName, "err", err)
 			errs = append(errs, fmt.Errorf("Error validating profile %s: %w", profileName, err))
-			delete(profiles, profileName)
-		} else if profile.Disabled && profileFilter == "" {
-			// If a profile filter is set, don't skip disabled profile, assume it was
-			// done on purpose.
-			log.Info("Profile is disabled, skipping.", "profile", profileName)
 			delete(profiles, profileName)
 		} else {
 			profiles[profileName] = profile

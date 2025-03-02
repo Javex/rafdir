@@ -43,6 +43,7 @@ type Profile struct {
 	Namespace     string   `json:"namespace"`
 	Deployment    string   `json:"deployment"`
 	StatefulSet   string   `json:"statefulset"`
+	Node          string   `json:"node"`
 	Stop          bool     `json:"stop"`
 	Host          string   `json:"host"`
 	Folders       []string `json:"folders"`
@@ -113,36 +114,70 @@ func ProfilesFromYamlString(profilesString string, profileFilter string) (map[st
 }
 
 func (p Profile) Validate() error {
-	if p.Namespace == "" {
-		return fmt.Errorf("Namespace is required for profile %s", p.Name)
+	if p.Node != "" {
+		if err := p.validateNode(); err != nil {
+			return err
+		}
+	} else {
+		if p.Namespace == "" {
+			return fmt.Errorf("Namespace is required for profile %s", p.Name)
+		}
+
+		if p.Host == "" {
+			return fmt.Errorf("Host is required for profile %s", p.Name)
+		}
+
+		if p.Deployment == "" && p.StatefulSet == "" {
+			return fmt.Errorf("Either Deployment, StatefulSet or Node is required for profile %s", p.Name)
+		}
+
+		if p.Deployment != "" && p.StatefulSet != "" {
+			return fmt.Errorf("Only one of Deployment, StatefulSet or Node is allowed for profile %s", p.Name)
+		}
+
+		if len(p.Folders) == 0 && p.StdInCommand == "" {
+			return fmt.Errorf("Either Folders or StdInCommand is required for profile %s", p.Name)
+		}
+
+		if len(p.Folders) > 0 && p.StdInCommand != "" {
+			return fmt.Errorf("Currently only one of Folders or StdInCommand is allowed for profile %s", p.Name)
+		}
+
+		if p.StdInFilename != "" && p.StdInCommand == "" {
+			return fmt.Errorf("StdInFilename is only allowed when StdInCommand is set for profile %s", p.Name)
+		}
+
+		if len(p.Folders) > 1 {
+			return fmt.Errorf("Currently only one folder is allowed for profile %s", p.Name)
+		}
+
+	}
+	return nil
+}
+
+func (p Profile) validateNode() error {
+	if p.Namespace != "" {
+		return fmt.Errorf("Namespace is not allowed if node is specified for profile %s", p.Name)
 	}
 
-	if p.Host == "" {
-		return fmt.Errorf("Host is required for profile %s", p.Name)
+	if p.Host != "" {
+		return fmt.Errorf("Host is not allowed if node is specified as it is inferred from node for profile %s", p.Name)
 	}
 
-	if p.Deployment == "" && p.StatefulSet == "" {
-		return fmt.Errorf("Either Deployment or StatefulSet is required for profile %s", p.Name)
+	if p.Deployment != "" {
+		return fmt.Errorf("Deployment is not allowed if node is specified for profile %s", p.Name)
 	}
 
-	if p.Deployment != "" && p.StatefulSet != "" {
-		return fmt.Errorf("Only one of Deployment or StatefulSet is allowed for profile %s", p.Name)
+	if p.StatefulSet != "" {
+		return fmt.Errorf("StatefulSet is not allowed if node is specified for profile %s", p.Name)
 	}
 
-	if len(p.Folders) == 0 && p.StdInCommand == "" {
-		return fmt.Errorf("Either Folders or StdInCommand is required for profile %s", p.Name)
+	if p.StdInCommand != "" {
+		return fmt.Errorf("StdInCommand is not allowed if node is specified for profile %s", p.Name)
 	}
 
-	if len(p.Folders) > 0 && p.StdInCommand != "" {
-		return fmt.Errorf("Currently only one of Folders or StdInCommand is allowed for profile %s", p.Name)
-	}
-
-	if p.StdInFilename != "" && p.StdInCommand == "" {
-		return fmt.Errorf("StdInFilename is only allowed when StdInCommand is set for profile %s", p.Name)
-	}
-
-	if len(p.Folders) > 1 {
-		return fmt.Errorf("Currently only one folder is allowed for profile %s", p.Name)
+	if len(p.Folders) == 0 {
+		return fmt.Errorf("Folders is required f node is sepecified for profile %s", p.Name)
 	}
 
 	return nil
@@ -150,6 +185,12 @@ func (p Profile) Validate() error {
 
 func (p Profile) ToTOML(repoName RepositoryName) (string, error) {
 	templateBuffer := new(bytes.Buffer)
+	var host string
+	if p.Node != "" {
+		host = p.Node
+	} else {
+		host = p.Host
+	}
 	templateData := struct {
 		Name          string
 		Inherit       RepositoryName
@@ -165,7 +206,7 @@ func (p Profile) ToTOML(repoName RepositoryName) (string, error) {
 		Folders:       p.Folders,
 		StdInCommand:  p.StdInCommand,
 		StdInFilename: p.StdInFilename,
-		Host:          p.Host,
+		Host:          host,
 	}
 	tomlTemplate.Execute(templateBuffer, templateData)
 	return templateBuffer.String(), nil
@@ -195,14 +236,21 @@ func (p Profile) ToConfigMap(repos []Repository, backupNamespace string, cmName 
 	return cm, nil
 }
 
-func (p Profile) BackupTarget(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) (*BackupTarget, error) {
-	var target *BackupTarget
+func (p *Profile) BackupTarget(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, runSuffix string) (BackupTarget, error) {
+	var target BackupTarget
 	var err error
 
 	if p.Deployment != "" {
-		target, err = NewBackupTargetFromDeploymentName(ctx, log, kubeclient, p.Namespace, p.Deployment)
+		log.Debug("Creating backup target from deployment", "deployment", p.Deployment)
+		target, err = NewBackupTargetFromDeploymentName(ctx, log, kubeclient, p, runSuffix)
+	} else if p.StatefulSet != "" {
+		log.Debug("Creating backup target from statefulset", "statefulset", p.StatefulSet)
+		target, err = NewBackupTargetFromStatefulSetName(ctx, log, kubeclient, p, runSuffix)
+	} else if p.Node != "" {
+		log.Debug("Creating backup target from node", "node", p.Node)
+		target, err = NewBackupTargetFromNodeName(ctx, kubeclient, p, runSuffix)
 	} else {
-		target, err = NewBackupTargetFromStatefulSetName(ctx, log, kubeclient, p.Namespace, p.StatefulSet)
+		return nil, fmt.Errorf("Profile %s has no Deployment, StatefulSet or Node", p.Name)
 	}
 
 	if err != nil {

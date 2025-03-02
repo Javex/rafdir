@@ -167,17 +167,22 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 	runSuffix := generateRunSuffix()
 	config := s.config
 	repos := config.Repositories
-	namespace := profile.Namespace
-	target, err := profile.BackupTarget(ctx, log, s.kubeClient)
+	target, err := profile.BackupTarget(ctx, log, s.kubeClient, runSuffix)
 	if err != nil {
-		return fmt.Errorf("Failed to NewBackupTargetFromDeploymentName: %s", err)
+		return fmt.Errorf("Failed to BackupTarget: %s", err)
 	}
 
-	podName := fmt.Sprintf("%s-%s-%s", profile.Name, target.Pod.Name, runSuffix)
+	podName := target.PodName()
 	configMapName := fmt.Sprintf("%s-%s", profile.Name, runSuffix)
 
 	var scaleUp func()
 	if profile.Stop {
+		podTarget, ok := target.(*internal.PodBackupTarget)
+		if !ok {
+			log.Error("Stop requires a PodBackupTarget")
+			return fmt.Errorf("Stop requires a PodBackupTarget")
+		}
+		namespace := podTarget.Namespace
 
 		oldReplicas, err := s.ScaleTo(ctx, namespace, profile.Deployment, 0)
 		if err != nil {
@@ -201,7 +206,7 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 		}
 
 		// Wait until all pods have stopped
-		err = s.WaitStopped(ctx, namespace, target.Selector)
+		err = s.WaitStopped(ctx, namespace, podTarget.Selector)
 		if err != nil {
 			log.Error("Error waiting for pods to stop", "err", err, "deploymentName", profile.Deployment, "namespace", namespace)
 			return fmt.Errorf("Failed WaitStopped: %s", err)
@@ -213,17 +218,29 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 	backupPod := s.NewBackupPod(podName)
 
 	if profile.StdInCommand != "" {
-		AddStdInCommandArgs(backupPod, profile, target.Pod.Name)
+		podTarget, ok := target.(*internal.PodBackupTarget)
+		if !ok {
+			log.Error("StdInCommand requires a PodBackupTarget")
+			return fmt.Errorf("StdInCommand requires a PodBackupTarget")
+		}
+		AddStdInCommandArgs(backupPod, profile, podTarget.Pod.Name)
 	}
 
-	if len(profile.Folders) > 0 {
+	// Only take a snapshot backup if there are folders and it's not a host mount
+	// backup
+	if len(profile.Folders) > 0 && profile.Node == "" {
+		podTarget, ok := target.(*internal.PodBackupTarget)
+		if !ok {
+			log.Error("Folders without Node requires a PodBackupTarget")
+			return fmt.Errorf("Folders without Node requires a PodBackupTarget")
+		}
 
-		sourcePvc, err := target.FindPvc(ctx, log, s.kubeClient)
+		sourcePvc, err := podTarget.FindPvc(ctx, log, s.kubeClient)
 		if err != nil {
 			return fmt.Errorf("Failed to FindPvc: %s", err)
 		}
 
-		volumeMount, err := target.FindVolumeMount(ctx, log, s.kubeClient)
+		volumeMount, err := podTarget.FindVolumeMount(ctx, log, s.kubeClient)
 		if err != nil {
 			return fmt.Errorf("Failed to FindVolumeMount: %s", err)
 		}
@@ -252,6 +269,17 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 		}
 
 		s.AddPvcToPod(backupPod, volumeMount, backupPvc.Name)
+	}
+
+	// Backing up a host volume on a node
+	if len(profile.Folders) > 0 && profile.Node != "" {
+		nodeTarget, ok := target.(*internal.NodeBackupTarget)
+		if !ok {
+			log.Error("Folders without Node requires a NodeBackupTarget")
+			return fmt.Errorf("Folders without Node requires a NodeBackupTarget")
+		}
+
+		nodeTarget.AddNodeVolumeToPod(ctx, backupPod)
 	}
 
 	profileConfigMap, err := profile.ToConfigMap(repos, s.config.BackupNamespace, configMapName)

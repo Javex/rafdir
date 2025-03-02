@@ -302,7 +302,12 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 			}
 
 			log := newTestLogger(t)
-			target, err := internal.NewBackupTargetFromDeploymentName(ctx, log, kubeclient, namespace, tc.deploymentName)
+			profile := &internal.Profile{
+				Deployment: tc.deploymentName,
+				Namespace:  namespace,
+			}
+			runSuffix := "test"
+			target, err := internal.NewBackupTargetFromDeploymentName(ctx, log, kubeclient, profile, runSuffix)
 			if tc.expErrContains != "" {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -607,7 +612,12 @@ func TestFindPvcAndVolumeMount(t *testing.T) {
 			}
 
 			log := newTestLogger(t)
-			target, err := internal.NewBackupTargetFromDeploymentName(ctx, log, kubeclient, namespace, tc.deploymentName)
+			profile := &internal.Profile{
+				Deployment: tc.deploymentName,
+				Namespace:  namespace,
+			}
+			runSuffix := "test"
+			target, err := internal.NewBackupTargetFromDeploymentName(ctx, log, kubeclient, profile, runSuffix)
 			if err != nil {
 				t.Fatalf("failed to create target: %v", err)
 			}

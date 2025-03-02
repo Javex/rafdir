@@ -12,7 +12,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-type BackupTarget struct {
+type BackupTarget interface {
+	PodName() string
+}
+
+type PodBackupTarget struct {
 	Pod       *corev1.Pod
 	Namespace string
 	NodeName  string
@@ -20,12 +24,19 @@ type BackupTarget struct {
 
 	pvc         *corev1.PersistentVolumeClaim
 	volumeMount *corev1.VolumeMount
+
+	profile *Profile
+
+	podName string
 }
 
-// NewBackupTargetFromDeploymentName creates a BackupTarget from a namespace
+// NewBackupTargetFromDeploymentName creates a PodBackupTarget from a namespace
 // and a deployment name. It finds the deployment, then the pod, then the PVC
 // and the node name the pod is running on.
-func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, namespace string, deploymentName string) (*BackupTarget, error) {
+func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, profile *Profile, runSuffix string) (*PodBackupTarget, error) {
+	deploymentName := profile.Deployment
+	namespace := profile.Namespace
+
 	if deploymentName == "" {
 		return nil, fmt.Errorf("deploymentName cannot be empty")
 	}
@@ -44,10 +55,13 @@ func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, ku
 		return nil, fmt.Errorf("selector not found for deployment %s", deploymentName)
 	}
 
-	return backupTargetFromSelector(ctx, kubeclient, namespace, selector)
+	return backupTargetFromSelector(ctx, kubeclient, namespace, selector, profile, runSuffix)
 }
 
-func NewBackupTargetFromStatefulSetName(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, namespace, statefulSetName string) (*BackupTarget, error) {
+func NewBackupTargetFromStatefulSetName(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, profile *Profile, runSuffix string) (*PodBackupTarget, error) {
+	statefulSetName := profile.StatefulSet
+	namespace := profile.Namespace
+
 	if statefulSetName == "" {
 		return nil, fmt.Errorf("statefulSetName cannot be empty")
 	}
@@ -66,10 +80,10 @@ func NewBackupTargetFromStatefulSetName(ctx context.Context, log *slog.Logger, k
 		return nil, fmt.Errorf("selector not found for statefulSet %s", statefulSetName)
 	}
 
-	return backupTargetFromSelector(ctx, kubeclient, namespace, selector)
+	return backupTargetFromSelector(ctx, kubeclient, namespace, selector, profile, runSuffix)
 }
 
-func backupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Interface, namespace, selector string) (*BackupTarget, error) {
+func backupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Interface, namespace, selector string, profile *Profile, runSuffix string) (*PodBackupTarget, error) {
 	podList, err := kubeclient.CoreV1().
 		Pods(namespace).
 		List(ctx, metav1.ListOptions{
@@ -90,11 +104,15 @@ func backupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Interfa
 		return nil, fmt.Errorf("pod %s has no node", pod.Name)
 	}
 
-	target := &BackupTarget{
+	target := &PodBackupTarget{
 		Pod:       &pod,
 		Namespace: namespace,
 		NodeName:  nodeName,
 		Selector:  selector,
+
+		profile: profile,
+
+		podName: fmt.Sprintf("%s-%s-%s", profile.Name, pod.Name, runSuffix),
 	}
 	return target, nil
 }
@@ -102,7 +120,7 @@ func backupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Interfa
 // findPvcAndVolume iterates through all volumes and determines a PVC as backup
 // target. It is an error if there is no PVC. It is also an error if there is
 // more than one PVC. Also looks up the volume mount within the container.
-func (t *BackupTarget) findPvcAndVolume(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) error {
+func (t *PodBackupTarget) findPvcAndVolume(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) error {
 	if t.pvc == nil || t.volumeMount == nil {
 		pvcName := ""
 		volumeName := ""
@@ -156,7 +174,7 @@ func (t *BackupTarget) findPvcAndVolume(ctx context.Context, log *slog.Logger, k
 	return nil
 }
 
-func (t *BackupTarget) FindPvc(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) (*corev1.PersistentVolumeClaim, error) {
+func (t *PodBackupTarget) FindPvc(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) (*corev1.PersistentVolumeClaim, error) {
 	err := t.findPvcAndVolume(ctx, log, kubeclient)
 	if err != nil {
 		return nil, err
@@ -165,7 +183,7 @@ func (t *BackupTarget) FindPvc(ctx context.Context, log *slog.Logger, kubeclient
 	return t.pvc, nil
 }
 
-func (t *BackupTarget) FindVolumeMount(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) (*corev1.VolumeMount, error) {
+func (t *PodBackupTarget) FindVolumeMount(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) (*corev1.VolumeMount, error) {
 	err := t.findPvcAndVolume(ctx, log, kubeclient)
 	if err != nil {
 		return nil, err
@@ -212,4 +230,10 @@ func findStatefulSetByName(ctx context.Context, kubeclient kubernetes.Interface,
 		return nil, err
 	}
 	return statefulSet, nil
+}
+
+// PodName creates a unique name for the pod that runs the backup for this
+// target.
+func (t *PodBackupTarget) PodName() string {
+	return t.podName
 }

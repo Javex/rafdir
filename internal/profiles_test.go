@@ -179,6 +179,26 @@ func TestProfilesFromYaml(t *testing.T) {
 
 			map[string]internal.Profile{},
 		},
+		{
+			"node",
+			`
+        test:
+          name: testName
+          node: test-node.cluster
+          folders:
+            - /test/folder
+      `,
+			"",
+
+			map[string]internal.Profile{
+				"test": {
+					Name:    "test",
+					Node:    "test-node.cluster",
+					Stop:    false,
+					Folders: []string{"/test/folder"},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tcs {
@@ -210,6 +230,74 @@ func TestProfilesFromYamlErrors(t *testing.T) {
           namespace: testNamespace
           deployment: testDeployment
           host: test.example.com
+      `,
+		},
+		{
+			"deploymentAndStatefulSetMixed",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          statefulset: testDeployment
+          deployment: test-node.cluster
+          host: test.example.com
+          folders:
+            - /test/folder
+      `,
+		},
+		{
+			"nodeAndStatefulSetMixed",
+			`
+        test:
+          name: testName
+          statefulset: testDeployment
+          node: test-node.cluster
+          folders:
+            - /test/folder
+      `,
+		},
+		{
+			"nodeAndDeploymentMixed",
+			`
+        test:
+          name: testName
+          deployment: testDeployment
+          node: test-node.cluster
+          folders:
+            - /test/folder
+      `,
+		},
+		{
+			"nodeWithNamespace",
+			`
+        test:
+          name: testName
+          node: test-node.cluster
+          namespace: testNamespace
+          folders:
+            - /test/folder
+      `,
+		},
+		{
+			"nodeWithHostname",
+			`
+        test:
+          name: testName
+          node: test-node.cluster
+          host: test.example.com
+          folders:
+            - /test/folder
+      `,
+		},
+		{
+			"nodeWithCommand",
+			`
+        test:
+          name: testName
+          node: test-node.cluster
+          stdin-command: test command
+          folders:
+            - /test/folder
       `,
 		},
 	}

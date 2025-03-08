@@ -51,6 +51,7 @@ type Profile struct {
 	StdInCommand   string   `json:"stdin-command"`
 	StdInFilename  string   `json:"stdin-filename"`
 	StdInNamespace string   `json:"stdin-namespace"`
+	StdInSelector  string   `json:"stdin-selector"`
 
 	Name string
 }
@@ -143,6 +144,10 @@ func (p Profile) Validate() error {
 
 		if len(p.Folders) > 0 && p.StdInCommand != "" && p.StdInFilename == "" {
 			return fmt.Errorf("StdInFilename is required when StdInCommand is set and Folders are not empty for profile %s", p.Name)
+		}
+
+		if p.StdInNamespace != "" && p.StdInSelector == "" {
+			return fmt.Errorf("StdInSelector is required when StdInNamespace is set for profile %s", p.Name)
 		}
 
 		if p.StdInFilename != "" && p.StdInCommand == "" {
@@ -266,7 +271,16 @@ func (p *Profile) BackupTarget(ctx context.Context, log *slog.Logger, kubeclient
 	}
 
 	return target, nil
+}
 
+func (p *Profile) StdInTarget(ctx context.Context, kubeclient kubernetes.Interface, runSuffix string) (*PodBackupTarget, error) {
+	log := slog.Default()
+	if p.StdInSelector == "" {
+		return nil, fmt.Errorf("Profile %s has no StdInSelector", p.Name)
+	}
+
+	log.Debug("Creating backup target from stdin selector", "selector", p.StdInSelector)
+	return NewBackupTargetFromSelector(ctx, kubeclient, p.StdInNamespace, p.StdInSelector, p, runSuffix)
 }
 
 // StdInCommandNamespace either returns the explicit namespace of

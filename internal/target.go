@@ -55,7 +55,7 @@ func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, ku
 		return nil, fmt.Errorf("selector not found for deployment %s", deploymentName)
 	}
 
-	return backupTargetFromSelector(ctx, kubeclient, namespace, selector, profile, runSuffix)
+	return NewBackupTargetFromSelector(ctx, kubeclient, namespace, selector, profile, runSuffix)
 }
 
 func NewBackupTargetFromStatefulSetName(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, profile *Profile, runSuffix string) (*PodBackupTarget, error) {
@@ -80,10 +80,10 @@ func NewBackupTargetFromStatefulSetName(ctx context.Context, log *slog.Logger, k
 		return nil, fmt.Errorf("selector not found for statefulSet %s", statefulSetName)
 	}
 
-	return backupTargetFromSelector(ctx, kubeclient, namespace, selector, profile, runSuffix)
+	return NewBackupTargetFromSelector(ctx, kubeclient, namespace, selector, profile, runSuffix)
 }
 
-func backupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Interface, namespace, selector string, profile *Profile, runSuffix string) (*PodBackupTarget, error) {
+func NewBackupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Interface, namespace, selector string, profile *Profile, runSuffix string) (*PodBackupTarget, error) {
 	podList, err := kubeclient.CoreV1().
 		Pods(namespace).
 		List(ctx, metav1.ListOptions{

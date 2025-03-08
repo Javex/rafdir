@@ -100,7 +100,9 @@ func (b *Backup) Run() []error {
 
 	errs := make([]error, 0)
 	var stdoutReader *bytes.Reader
+	var reader io.Reader
 	if stdout != nil {
+		log.Debug("Have stdout from stdin command")
 		// If StdInFilepath is set, save the stdout to a file, otherwise provide it
 		// directly to resticprofile as stdin.
 		if b.StdInFilepath != "" {
@@ -108,8 +110,10 @@ func (b *Backup) Run() []error {
 				log.Error("Failed to write file", "error", err, "filepath", b.StdInFilepath)
 				return []error{err}
 			}
+			log.Debug("Wrote file", "filepath", b.StdInFilepath)
 		} else {
 			stdoutReader = bytes.NewReader(stdout.Bytes())
+			log.Debug("Created reader from stdout to pass as stdin to resticprofile")
 		}
 	}
 
@@ -118,12 +122,18 @@ func (b *Backup) Run() []error {
 		log.Info("Starting backup")
 
 		if stdoutReader != nil {
+			log.Debug("Resetting reader to beginning of buffer")
 			// Reset the reader to the beginning of the buffer
 			stdoutReader.Seek(0, 0)
+			// This needs to be explicitly assigned to an interface type which *can*
+			// be nil. If the stdoutReader is directly passed to the runResticprofile
+			// function, the nil check won't work due to some Go interface
+			// shenanigans.
+			reader = stdoutReader
 		}
 
 		// Execute the profile
-		err = b.runResticprofile(profile, stdoutReader)
+		err = b.runResticprofile(profile, reader)
 		if err != nil {
 			log.Error("Backup failed", "error", err)
 			errs = append(errs, err)
@@ -166,8 +176,11 @@ func (b *Backup) runResticprofile(profile string, stdout io.Reader) error {
 		args...,
 	)
 
-	if b.StdInPod != "" {
+	// Stdout might be nil if no command was run, so in that case don't attach
+	// it, all backup data will be as folders attached as volumes.
+	if stdout != nil {
 		cmd.Stdin = stdout
+		log.Debug("Attaching stdin to resticprofile")
 	}
 
 	cmd.Stdout = os.Stdout

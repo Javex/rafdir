@@ -218,12 +218,28 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 	backupPod := s.NewBackupPod(podName)
 
 	if profile.StdInCommand != "" {
-		podTarget, ok := target.(*internal.PodBackupTarget)
-		if !ok {
-			log.Error("StdInCommand requires a PodBackupTarget")
-			return fmt.Errorf("StdInCommand requires a PodBackupTarget")
+		// TODO: This logic should not be here but inside profile. Currently the
+		// Profile.StdInTarget function is a good place to handle this, but the
+		// other targets are created by Profile.BackupTarget. It would probably be
+		// best if Profile handled targets internally, then it could dynamically
+		// decide which target to return here. Right now there's logic to throw an
+		// error and we need to avoid causing it by putting a similar check here.
+		var stdInTarget *internal.PodBackupTarget
+		if profile.StdInSelector != "" {
+			stdInTarget, err = profile.StdInTarget(ctx, s.kubeClient, runSuffix)
+			if err != nil {
+				log.Error("Failed to get StdInTarget", "err", err)
+				return fmt.Errorf("Failed to StdInTarget: %s", err)
+			}
+		} else {
+			var ok bool
+			stdInTarget, ok = target.(*internal.PodBackupTarget)
+			if !ok {
+				log.Error("StdInCommand requires a PodBackupTarget")
+				return fmt.Errorf("StdInCommand requires a PodBackupTarget")
+			}
 		}
-		AddStdInCommandArgs(backupPod, profile, podTarget.Pod.Name)
+		AddStdInCommandArgs(backupPod, profile, stdInTarget.Pod.Name)
 	}
 
 	// Only take a snapshot backup if there are folders and it's not a host mount

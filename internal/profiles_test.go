@@ -105,6 +105,7 @@ func TestProfilesFromYaml(t *testing.T) {
           host: test.example.com
           stdin-command: test command
           stdin-namespace: testCmdNamespace
+          stdin-selector: app=testApp,instance=testInstance
           stdin-filename: testfile
           folders:
             - /test/folder
@@ -120,6 +121,7 @@ func TestProfilesFromYaml(t *testing.T) {
 					Stop:           false,
 					StdInCommand:   "test command",
 					StdInNamespace: "testCmdNamespace",
+					StdInSelector:  "app=testApp,instance=testInstance",
 					StdInFilename:  "testfile",
 					Folders:        []string{"/test/folder"},
 				},
@@ -360,6 +362,21 @@ func TestProfilesFromYamlErrors(t *testing.T) {
           host: test.example.com
           stdin-command: test command
           stdin-namespace: testCmdNamespace
+          folders:
+            - /test/folder
+      `,
+		},
+		{
+			"StdInNamespaceWithoutSelector",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          stdin-command: test command
+          stdin-namespace: testCmdNamespace
+          stdin-filename: testfile
           folders:
             - /test/folder
       `,

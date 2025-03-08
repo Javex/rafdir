@@ -19,6 +19,8 @@ type NodeBackupTarget struct {
 }
 
 func (n *NodeBackupTarget) PodName() string {
+	// TODO: Normalise pod name to fix this warning:
+	// metadata.name: this is used in the Pod's hostname, which can result in surprising behavior; a DNS label is recommended: [must not contain dots]
 	return n.podName
 }
 

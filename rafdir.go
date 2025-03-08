@@ -515,9 +515,13 @@ func AddStdInCommandArgs(pod *corev1.Pod, profile *internal.Profile, stdinPod st
 		"--stdin-pod",
 		stdinPod,
 		"--stdin-namespace",
-		profile.Namespace,
+		profile.StdInCommandNamespace(),
 		"--stdin-command",
 		profile.StdInCommand,
+	}
+
+	if path := profile.StdInFilepath(); path != "" {
+		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "--stdin-filepath", path)
 	}
 }
 

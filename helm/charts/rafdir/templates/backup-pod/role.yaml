@@ -2,12 +2,13 @@
 # pod should run commands in to take command-based backups.
 {{- $root := . }}
 {{- range $profileName, $profile := .Values.profiles }}
+{{ $namespace := or (index $profile "stdin-namespace") $profile.namespace }}
 {{- if (index $profile "stdin-command") }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ include "rafdir.name" $root }}-{{ $profileName }}-backup
-  namespace: {{ $profile.namespace }}
+  namespace: {{ $namespace }}
   labels:
     {{- include "rafdir.labels" $root | nindent 4 }}
 rules:
@@ -19,7 +20,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: {{ include "rafdir.name" $root }}-{{ $profileName }}-backup
-  namespace: {{ $profile.namespace }}
+  namespace: {{ $namespace }}
   labels:
     {{- include "rafdir.labels" $root | nindent 4 }}
 roleRef:

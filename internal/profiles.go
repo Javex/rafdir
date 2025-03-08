@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path"
 	"text/template"
 
 	corev1 "k8s.io/api/core/v1"
@@ -39,16 +40,17 @@ var tomlTemplate = template.Must(template.New("tomlTemplate").Parse(`
 `))
 
 type Profile struct {
-	Disabled      bool     `json:"disabled"`
-	Namespace     string   `json:"namespace"`
-	Deployment    string   `json:"deployment"`
-	StatefulSet   string   `json:"statefulset"`
-	Node          string   `json:"node"`
-	Stop          bool     `json:"stop"`
-	Host          string   `json:"host"`
-	Folders       []string `json:"folders"`
-	StdInCommand  string   `json:"stdin-command"`
-	StdInFilename string   `json:"stdin-filename"`
+	Disabled       bool     `json:"disabled"`
+	Namespace      string   `json:"namespace"`
+	Deployment     string   `json:"deployment"`
+	StatefulSet    string   `json:"statefulset"`
+	Node           string   `json:"node"`
+	Stop           bool     `json:"stop"`
+	Host           string   `json:"host"`
+	Folders        []string `json:"folders"`
+	StdInCommand   string   `json:"stdin-command"`
+	StdInFilename  string   `json:"stdin-filename"`
+	StdInNamespace string   `json:"stdin-namespace"`
 
 	Name string
 }
@@ -139,8 +141,8 @@ func (p Profile) Validate() error {
 			return fmt.Errorf("Either Folders or StdInCommand is required for profile %s", p.Name)
 		}
 
-		if len(p.Folders) > 0 && p.StdInCommand != "" {
-			return fmt.Errorf("Currently only one of Folders or StdInCommand is allowed for profile %s", p.Name)
+		if len(p.Folders) > 0 && p.StdInCommand != "" && p.StdInFilename == "" {
+			return fmt.Errorf("StdInFilename is required when StdInCommand is set and Folders are not empty for profile %s", p.Name)
 		}
 
 		if p.StdInFilename != "" && p.StdInCommand == "" {
@@ -200,14 +202,20 @@ func (p Profile) ToTOML(repoName RepositoryName) (string, error) {
 		StdInFilename string
 		Host          string
 	}{
-		Name:          p.fullProfileName(repoName),
-		Inherit:       repoName,
-		Tag:           p.Name,
-		Folders:       p.Folders,
-		StdInCommand:  p.StdInCommand,
-		StdInFilename: p.StdInFilename,
-		Host:          host,
+		Name:    p.fullProfileName(repoName),
+		Inherit: repoName,
+		Tag:     p.Name,
+		Folders: p.Folders,
+		Host:    host,
 	}
+
+	// Only when there's no folders do we use the resticprofile stdin option. If
+	// there's a folder, the file will be written to that folder instead.
+	if len(p.Folders) == 0 {
+		templateData.StdInCommand = p.StdInCommand
+		templateData.StdInFilename = p.StdInFilename
+	}
+
 	tomlTemplate.Execute(templateBuffer, templateData)
 	return templateBuffer.String(), nil
 }
@@ -259,4 +267,35 @@ func (p *Profile) BackupTarget(ctx context.Context, log *slog.Logger, kubeclient
 
 	return target, nil
 
+}
+
+// StdInCommandNamespace either returns the explicit namespace of
+// StdInNamespace or the regular Namespace field.
+func (p *Profile) StdInCommandNamespace() string {
+	if p.StdInNamespace != "" {
+		return p.StdInNamespace
+	}
+	return p.Namespace
+}
+
+// StdInFilepath joins the first backup folder with the StdInFilepath if set,
+// or returns an empty string if no file should be written.
+func (p *Profile) StdInFilepath() string {
+	// If there are no folders, the command comes via stdin and doesn't need a
+	// path
+	if len(p.Folders) == 0 {
+		return ""
+	}
+
+	// If there is no file name there is no path to save.
+	if p.StdInFilename == "" {
+		return ""
+	}
+
+	// If there's both folder and filename, that's when command output needs to
+	// be saved to a file inside that folder.
+	firstFolder := p.Folders[0]
+
+	// Join the filename with the path of the first folder
+	return path.Join(firstFolder, p.StdInFilename)
 }

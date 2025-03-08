@@ -11,10 +11,12 @@ import (
 
 func TestProfilesFromYaml(t *testing.T) {
 	tcs := []struct {
-		name          string
-		profileString string
-		profileFilter string
-		expProfile    map[string]internal.Profile
+		name                string
+		profileString       string
+		profileFilter       string
+		expProfile          map[string]internal.Profile
+		expCommandNamespace string
+		expFilepath         string
 	}{
 		{
 			"defaultStop",
@@ -39,6 +41,8 @@ func TestProfilesFromYaml(t *testing.T) {
 					Folders:    []string{"/test/folder"},
 				},
 			},
+			"testNamespace",
+			"", // expFilepath
 		},
 		{
 			"allFields",
@@ -64,6 +68,8 @@ func TestProfilesFromYaml(t *testing.T) {
 					Folders:    []string{"/test/folder"},
 				},
 			},
+			"testNamespace",
+			"", // expFilepath
 		},
 		{
 			"stdInCommand",
@@ -86,6 +92,40 @@ func TestProfilesFromYaml(t *testing.T) {
 					StdInCommand: "test command",
 				},
 			},
+			"testNamespace",
+			"", // expFilepath
+		},
+		{
+			"foldersAndCommand",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          stdin-command: test command
+          stdin-namespace: testCmdNamespace
+          stdin-filename: testfile
+          folders:
+            - /test/folder
+      `,
+			"",
+
+			map[string]internal.Profile{
+				"test": {
+					Name:           "test",
+					Namespace:      "testNamespace",
+					Deployment:     "testDeployment",
+					Host:           "test.example.com",
+					Stop:           false,
+					StdInCommand:   "test command",
+					StdInNamespace: "testCmdNamespace",
+					StdInFilename:  "testfile",
+					Folders:        []string{"/test/folder"},
+				},
+			},
+			"testCmdNamespace",
+			"/test/folder/testfile", // expFilepath
 		},
 		{
 			"disabled",
@@ -100,6 +140,8 @@ func TestProfilesFromYaml(t *testing.T) {
       `,
 			"",
 			map[string]internal.Profile{},
+			"testNamespace",
+			"", // expFilepath
 		},
 		{
 			"filterMatch",
@@ -124,6 +166,8 @@ func TestProfilesFromYaml(t *testing.T) {
 					Folders:    []string{"/test/folder"},
 				},
 			},
+			"testNamespace",
+			"", // expFilepath
 		},
 		{
 			"filterNoMatch",
@@ -139,6 +183,8 @@ func TestProfilesFromYaml(t *testing.T) {
 			"otherFilter",
 
 			map[string]internal.Profile{},
+			"testNamespace",
+			"", // expFilepath
 		},
 		{
 			"filterMatchDisabled",
@@ -165,6 +211,8 @@ func TestProfilesFromYaml(t *testing.T) {
 					Folders:    []string{"/test/folder"},
 				},
 			},
+			"testNamespace",
+			"", // expFilepath
 		},
 		{
 			"invalidButFiltered",
@@ -178,6 +226,8 @@ func TestProfilesFromYaml(t *testing.T) {
 			"otherFilter",
 
 			map[string]internal.Profile{},
+			"testNamespace",
+			"", // expFilepath
 		},
 		{
 			"node",
@@ -198,6 +248,8 @@ func TestProfilesFromYaml(t *testing.T) {
 					Folders: []string{"/test/folder"},
 				},
 			},
+			"", // expCommandNamespace
+			"", // expFilepath
 		},
 	}
 
@@ -211,6 +263,15 @@ func TestProfilesFromYaml(t *testing.T) {
 
 			if !cmp.Equal(profiles, tc.expProfile) {
 				t.Fatalf("Unexpected difference in profiles: %v", cmp.Diff(profiles, tc.expProfile))
+			}
+
+			for _, profile := range profiles {
+				if profile.StdInCommandNamespace() != tc.expCommandNamespace {
+					t.Fatalf("Unexpected difference in command namespace: %v", cmp.Diff(profile.StdInNamespace, tc.expCommandNamespace))
+				}
+				if profile.StdInFilepath() != tc.expFilepath {
+					t.Fatalf("Unexpected difference in filepath: %v", cmp.Diff(profile.StdInFilename, tc.expFilepath))
+				}
 			}
 		})
 	}
@@ -290,12 +351,15 @@ func TestProfilesFromYamlErrors(t *testing.T) {
       `,
 		},
 		{
-			"nodeWithCommand",
+			"FoldersAndCommandWithoutFilename",
 			`
         test:
           name: testName
-          node: test-node.cluster
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
           stdin-command: test command
+          stdin-namespace: testCmdNamespace
           folders:
             - /test/folder
       `,
@@ -391,6 +455,33 @@ func TestProfileToTOML(t *testing.T) {
     tag = ["testName"]
     stdin = true
     stdin-filename = "testfile"
+    host = "test.example.com"
+  [testName-testRepo.snapshots]
+    tag = ["testName"]
+    host = "test.example.com"
+`,
+		},
+		{
+			name: "stdinCommandWithFoldersAndFilename",
+			profile: internal.Profile{
+				Name:          "testName",
+				Namespace:     "testNamespace",
+				Host:          "test.example.com",
+				Folders:       []string{"/data"},
+				StdInCommand:  "test command",
+				StdInFilename: "testfile",
+			},
+			repo: internal.Repository{
+				Name: "testRepo",
+			},
+			expTOML: `
+[testName-testRepo]
+  inherit = "testRepo"
+  [testName-testRepo.backup]
+    tag = ["testName"]
+    source = [
+    "/data",
+    ]
     host = "test.example.com"
   [testName-testRepo.snapshots]
     tag = ["testName"]

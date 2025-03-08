@@ -30,6 +30,11 @@ type Backup struct {
 	StdInNamespace string
 	// Command to run to get the backup data
 	StdInCommand string
+	// Destination path where to save file from running StdInCommand. This can be
+	// empty which means the file is saved directly by resticprofile through its
+	// stdin option. However, when backing up both folder & a command, then the
+	// file is saved in the first folder which is this option.
+	StdInFilepath string
 
 	KubernetesClient kubernetes.Interface
 	Kubeconfig       *rest.Config
@@ -49,6 +54,7 @@ func (b *Backup) Validate() error {
 	}
 
 	// Return an error if only some of the stdin flags are set
+	// StdInFilepath is optional
 	if (b.StdInPod != "" || b.StdInNamespace != "" || b.StdInCommand != "") &&
 		(b.StdInPod == "" || b.StdInNamespace == "" || b.StdInCommand == "") {
 		return fmt.Errorf("If one of the stdin flags is set, all of them must be set")
@@ -95,8 +101,18 @@ func (b *Backup) Run() []error {
 	errs := make([]error, 0)
 	var stdoutReader *bytes.Reader
 	if stdout != nil {
-		stdoutReader = bytes.NewReader(stdout.Bytes())
+		// If StdInFilepath is set, save the stdout to a file, otherwise provide it
+		// directly to resticprofile as stdin.
+		if b.StdInFilepath != "" {
+			if err := os.WriteFile(b.StdInFilepath, stdout.Bytes(), 0644); err != nil {
+				log.Error("Failed to write file", "error", err, "filepath", b.StdInFilepath)
+				return []error{err}
+			}
+		} else {
+			stdoutReader = bytes.NewReader(stdout.Bytes())
+		}
 	}
+
 	for _, profile := range profiles {
 		log = log.With("profile", profile)
 		log.Info("Starting backup")

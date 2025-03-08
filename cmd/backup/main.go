@@ -38,6 +38,7 @@ func addFlags(cmd *cobra.Command, backup *backup.Backup) error {
 	cmd.Flags().StringVarP(&backup.StdInPod, "stdin-pod", "", "", "Pod in which to run the stdin command to create backup data")
 	cmd.Flags().StringVarP(&backup.StdInNamespace, "stdin-namespace", "", "", "Namespace in which to run the stdin command to create backup data")
 	cmd.Flags().StringVarP(&backup.StdInCommand, "stdin-command", "", "", "Command to run to get the backup data")
+	cmd.Flags().StringVarP(&backup.StdInFilepath, "stdin-filepath", "", "", "Destination path where to save file from running StdInCommand")
 
 	var kubeClient *kubernetes.Clientset
 	var cfg *rest.Config

@@ -10,3 +10,4 @@ reclaimPolicy: Delete
 volumeBindingMode: Immediate
 parameters:
   numberOfReplicas: "1"
+  dataLocality: "best-effort"

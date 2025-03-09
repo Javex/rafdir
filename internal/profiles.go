@@ -9,7 +9,6 @@ import (
 	"text/template"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
 )
@@ -229,13 +228,10 @@ func (p Profile) fullProfileName(repoName RepositoryName) string {
 	return fmt.Sprintf("%s-%s", p.Name, repoName)
 }
 
-func (p Profile) ToConfigMap(repos []Repository, backupNamespace string, cmName string) (*corev1.ConfigMap, error) {
+func (p Profile) ToConfigMap(repos []Repository, backupNamespace, cmName, runSuffix string) (*corev1.ConfigMap, error) {
 	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cmName,
-			Namespace: backupNamespace,
-		},
-		Data: make(map[string]string),
+		ObjectMeta: NewObjectMeta(cmName, backupNamespace, runSuffix),
+		Data:       make(map[string]string),
 	}
 
 	for _, repoName := range repos {

@@ -215,7 +215,7 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 		log.Info("Deployment scaled down", "deploymentName", profile.Deployment, "namespace", namespace)
 	}
 
-	backupPod := s.NewBackupPod(podName)
+	backupPod := s.NewBackupPod(podName, runSuffix)
 
 	if profile.StdInCommand != "" {
 		// TODO: This logic should not be here but inside profile. Currently the
@@ -298,7 +298,7 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 		nodeTarget.AddNodeVolumeToPod(ctx, backupPod)
 	}
 
-	profileConfigMap, err := profile.ToConfigMap(repos, s.config.BackupNamespace, configMapName)
+	profileConfigMap, err := profile.ToConfigMap(repos, s.config.BackupNamespace, configMapName, runSuffix)
 	if err != nil {
 		return fmt.Errorf("Failed to ToConfigMap: %s", err)
 	}
@@ -437,13 +437,10 @@ func (s *SnapshotClient) DeleteConfigMap(ctx context.Context, configMapName stri
 	return nil
 }
 
-func (s *SnapshotClient) NewBackupPod(podName string) *corev1.Pod {
+func (s *SnapshotClient) NewBackupPod(podName, runSuffix string) *corev1.Pod {
 	optional := false
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      podName,
-			Namespace: s.config.BackupNamespace,
-		},
+		ObjectMeta: internal.NewObjectMeta(podName, s.config.BackupNamespace, runSuffix),
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{

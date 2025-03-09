@@ -200,10 +200,7 @@ func (s *PvcSnapshotter) takeSnapshot(ctx context.Context, snapshotName string, 
 	}
 
 	snapshot := volumesnapshot.VolumeSnapshot{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      snapshotName,
-			Namespace: namespace,
-		},
+		ObjectMeta: NewObjectMeta(snapshotName, namespace, s.runSuffix),
 		Spec: volumesnapshot.VolumeSnapshotSpec{
 			VolumeSnapshotClassName: &s.snapshotClass,
 			Source: volumesnapshot.VolumeSnapshotSource{
@@ -239,10 +236,7 @@ func (s *PvcSnapshotter) snapshotFromContent(ctx context.Context, snapshotName s
 	}
 
 	snapshot := volumesnapshot.VolumeSnapshot{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      snapshotName,
-			Namespace: s.destNamespace,
-		},
+		ObjectMeta: NewObjectMeta(snapshotName, s.destNamespace, s.runSuffix),
 		Spec: volumesnapshot.VolumeSnapshotSpec{
 			Source: volumesnapshot.VolumeSnapshotSource{
 				VolumeSnapshotContentName: contentName,
@@ -285,9 +279,7 @@ func (s *PvcSnapshotter) snapshotContentFromHandle(ctx context.Context, snapshot
 	}
 
 	snapshotContent := volumesnapshot.VolumeSnapshotContent{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: snapshotContentName,
-		},
+		ObjectMeta: NewObjectMeta(snapshotContentName, "", s.runSuffix),
 		Spec: volumesnapshot.VolumeSnapshotContentSpec{
 			DeletionPolicy:          volumesnapshot.VolumeSnapshotContentDelete,
 			Driver:                  s.snapshotDriver,
@@ -420,10 +412,7 @@ func (s *PvcSnapshotter) pvcFromSnapshot(ctx context.Context, snapshotName strin
 	apiGroup := volumesnapshot.GroupName
 
 	pvc = &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvcName,
-			Namespace: s.destNamespace,
-		},
+		ObjectMeta: NewObjectMeta(pvcName, s.destNamespace, s.runSuffix),
 		Spec: corev1.PersistentVolumeClaimSpec{
 			DataSource: &corev1.TypedLocalObjectReference{
 				Name:     snapshotName,

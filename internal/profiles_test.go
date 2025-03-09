@@ -548,6 +548,14 @@ func TestProfilesToConfigMap(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "testConfigMap",
 					Namespace: "testBackupNamespace",
+					Labels: map[string]string{
+						"app.kubernetes.io/component":  "resticprofile",
+						"app.kubernetes.io/instance":   "testConfigMap",
+						"app.kubernetes.io/managed-by": "rafdir",
+						"app.kubernetes.io/name":       "rafdir",
+						"app.kubernetes.io/part-of":    "rafdir",
+						"rafdir/runSuffix":             "testSuffix",
+					},
 				},
 				Data: map[string]string{
 					"testName-testRepo.toml": `
@@ -575,6 +583,7 @@ func TestProfilesToConfigMap(t *testing.T) {
 				[]internal.Repository{tc.repo},
 				tc.backupNamespace,
 				tc.configMapName,
+				"testSuffix",
 			)
 			if err != nil {
 				t.Fatalf("Error generating ConfigMap: %v", err)

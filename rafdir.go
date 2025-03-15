@@ -270,8 +270,8 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 		snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
 			DestNamespace: s.config.BackupNamespace,
 			RunSuffix:     runSuffix,
-			SnapshotClass: s.config.SnapshotClass,
-			StorageClass:  s.config.StorageClass,
+			SnapshotClass: profile.SnapshotClass,
+			StorageClass:  profile.StorageClass,
 			WaitTimeout:   s.config.WaitTimeout,
 			SleepDuration: s.config.SleepDuration,
 		})

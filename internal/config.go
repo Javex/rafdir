@@ -17,7 +17,6 @@ import (
 type Config struct {
 	GlobalConfigFile string
 	SnapshotClass    string
-	SnapshotDriver   string
 	BackupNamespace  string
 	// StorageClass is used for the temporary backup PVC which is different from
 	// the default one. It should still be the same underlying provisioner/driver
@@ -55,7 +54,21 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 	}
 	log.Info("Loaded repositories")
 
-	profiles, errs := ProfilesFromGlobalConfigMap(configMap, profileFilter)
+	config := &Config{
+		GlobalConfigFile:   globalConfigFile,
+		SnapshotClass:      "longhorn",
+		BackupNamespace:    backupNamespace,
+		StorageClass:       "rafdir",
+		SleepDuration:      1 * time.Second,
+		WaitTimeout:        10 * time.Second,
+		PodCreationTimeout: 10 * time.Minute,
+		PodWaitTimeout:     20 * time.Minute,
+		Image:              "ghcr.io/javex/rafdir:latest",
+
+		Repositories: repositories,
+	}
+
+	profiles, errs := ProfilesFromGlobalConfigMap(config, configMap, profileFilter)
 	if len(errs) > 0 {
 		log.Warn("There were errors when loading profiles", "errors", errs)
 	}
@@ -66,22 +79,9 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 	}
 
 	log.Info("Loaded profiles", "profileCount", len(profiles))
+	config.Profiles = profiles
 
-	return &Config{
-		GlobalConfigFile:   globalConfigFile,
-		SnapshotClass:      "longhorn",
-		SnapshotDriver:     "driver.longhorn.io",
-		BackupNamespace:    backupNamespace,
-		StorageClass:       "rafdir",
-		SleepDuration:      1 * time.Second,
-		WaitTimeout:        10 * time.Second,
-		PodCreationTimeout: 10 * time.Minute,
-		PodWaitTimeout:     20 * time.Minute,
-		Image:              "ghcr.io/javex/rafdir:latest",
-
-		Profiles:     profiles,
-		Repositories: repositories,
-	}, nil
+	return config, nil
 }
 
 func nindent(n int, s string) string {

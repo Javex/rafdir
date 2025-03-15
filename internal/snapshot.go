@@ -440,38 +440,7 @@ func (s *PvcSnapshotter) pvcFromSnapshot(ctx context.Context, snapshotName strin
 	}
 
 	log.Info("Created new PVC", "snapshotName", snapshotName)
-
-	ctx, cancel := context.WithTimeout(ctx, s.waitTimeout)
-	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			s.log.Error("Timed out waiting for PVC to be ready")
-			return nil, fmt.Errorf("Timeout")
-
-		default:
-			pvc, err = s.kubeClient.CoreV1().
-				PersistentVolumeClaims(s.destNamespace).
-				Get(ctx, pvcName, metav1.GetOptions{})
-			if err != nil {
-				if !k8sErrors.IsNotFound(err) {
-					log.Error("Unexpected error when waiting for PVC to be ready")
-					return nil, err
-				}
-				log.Warn("PVC does not exist yet, waiting for it to appear")
-				continue
-			}
-
-			if pvc.Status.Phase == corev1.ClaimBound {
-				log.Info("PVC is ready")
-				return pvc, nil
-			}
-
-			log.Debug("Waiting for PVC to be ready")
-			time.Sleep(s.sleepDuration)
-
-		}
-	}
+	return pvc, nil
 }
 
 func (s *PvcSnapshotter) deletePVC(ctx context.Context, pvcName string) error {

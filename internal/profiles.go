@@ -51,11 +51,13 @@ type Profile struct {
 	StdInFilename  string   `json:"stdin-filename"`
 	StdInNamespace string   `json:"stdin-namespace"`
 	StdInSelector  string   `json:"stdin-selector"`
+	SnapshotClass  string   `json:"snapshot-class"`
+	StorageClass   string   `json:"storage-class"`
 
 	Name string
 }
 
-func ProfilesFromGlobalConfigMap(globalConfigMap *corev1.ConfigMap, profileFilter string) (map[string]Profile, []error) {
+func ProfilesFromGlobalConfigMap(config *Config, globalConfigMap *corev1.ConfigMap, profileFilter string) (map[string]Profile, []error) {
 	if globalConfigMap.Data == nil {
 		return nil, []error{fmt.Errorf("ConfigMap %s has no data", globalConfigMap.Name)}
 	}
@@ -69,10 +71,6 @@ func ProfilesFromGlobalConfigMap(globalConfigMap *corev1.ConfigMap, profileFilte
 		return nil, []error{fmt.Errorf("ConfigMap %s has empty key `profiles`", globalConfigMap.Name)}
 	}
 
-	return ProfilesFromYamlString(profilesString, profileFilter)
-}
-
-func ProfilesFromYamlString(profilesString string, profileFilter string) (map[string]Profile, []error) {
 	log := slog.Default()
 	profiles := make(map[string]Profile)
 
@@ -101,6 +99,14 @@ func ProfilesFromYamlString(profilesString string, profileFilter string) (map[st
 			continue
 		}
 
+		if profile.SnapshotClass == "" {
+			profile.SnapshotClass = config.SnapshotClass
+		}
+
+		if profile.StorageClass == "" {
+			profile.StorageClass = config.StorageClass
+		}
+
 		// Validate the profile
 		err := profile.Validate()
 		if err != nil {
@@ -116,6 +122,16 @@ func ProfilesFromYamlString(profilesString string, profileFilter string) (map[st
 }
 
 func (p Profile) Validate() error {
+	// Check for any type of profile
+	if p.SnapshotClass == "" {
+		return fmt.Errorf("SnapshotClass is required for profile %s", p.Name)
+	}
+
+	if p.StorageClass == "" {
+		return fmt.Errorf("StorageClass is required for profile %s", p.Name)
+	}
+
+	// Run checks depending on profile type
 	if p.Node != "" {
 		if err := p.validateNode(); err != nil {
 			return err

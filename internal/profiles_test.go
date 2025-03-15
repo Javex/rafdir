@@ -33,12 +33,14 @@ func TestProfilesFromYaml(t *testing.T) {
 
 			map[string]internal.Profile{
 				"test": {
-					Name:       "test",
-					Namespace:  "testNamespace",
-					Deployment: "testDeployment",
-					Stop:       false,
-					Host:       "test.example.com",
-					Folders:    []string{"/test/folder"},
+					Name:          "test",
+					Namespace:     "testNamespace",
+					Deployment:    "testDeployment",
+					Stop:          false,
+					Host:          "test.example.com",
+					Folders:       []string{"/test/folder"},
+					SnapshotClass: "testSnapshotClass",
+					StorageClass:  "testStorageClass",
 				},
 			},
 			"testNamespace",
@@ -60,12 +62,14 @@ func TestProfilesFromYaml(t *testing.T) {
 
 			map[string]internal.Profile{
 				"test": {
-					Name:       "test",
-					Namespace:  "testNamespace",
-					Deployment: "testDeployment",
-					Stop:       true,
-					Host:       "test.example.com",
-					Folders:    []string{"/test/folder"},
+					Name:          "test",
+					Namespace:     "testNamespace",
+					Deployment:    "testDeployment",
+					Stop:          true,
+					Host:          "test.example.com",
+					Folders:       []string{"/test/folder"},
+					SnapshotClass: "testSnapshotClass",
+					StorageClass:  "testStorageClass",
 				},
 			},
 			"testNamespace",
@@ -85,11 +89,13 @@ func TestProfilesFromYaml(t *testing.T) {
 
 			map[string]internal.Profile{
 				"test": {
-					Name:         "test",
-					Namespace:    "testNamespace",
-					Deployment:   "testDeployment",
-					Host:         "test.example.com",
-					StdInCommand: "test command",
+					Name:          "test",
+					Namespace:     "testNamespace",
+					Deployment:    "testDeployment",
+					Host:          "test.example.com",
+					StdInCommand:  "test command",
+					SnapshotClass: "testSnapshotClass",
+					StorageClass:  "testStorageClass",
 				},
 			},
 			"testNamespace",
@@ -124,6 +130,8 @@ func TestProfilesFromYaml(t *testing.T) {
 					StdInSelector:  "app=testApp,instance=testInstance",
 					StdInFilename:  "testfile",
 					Folders:        []string{"/test/folder"},
+					SnapshotClass:  "testSnapshotClass",
+					StorageClass:   "testStorageClass",
 				},
 			},
 			"testCmdNamespace",
@@ -160,12 +168,14 @@ func TestProfilesFromYaml(t *testing.T) {
 
 			map[string]internal.Profile{
 				"test": {
-					Name:       "test",
-					Namespace:  "testNamespace",
-					Deployment: "testDeployment",
-					Stop:       false,
-					Host:       "test.example.com",
-					Folders:    []string{"/test/folder"},
+					Name:          "test",
+					Namespace:     "testNamespace",
+					Deployment:    "testDeployment",
+					Stop:          false,
+					Host:          "test.example.com",
+					Folders:       []string{"/test/folder"},
+					SnapshotClass: "testSnapshotClass",
+					StorageClass:  "testStorageClass",
 				},
 			},
 			"testNamespace",
@@ -204,13 +214,15 @@ func TestProfilesFromYaml(t *testing.T) {
 
 			map[string]internal.Profile{
 				"test": {
-					Disabled:   true,
-					Name:       "test",
-					Namespace:  "testNamespace",
-					Deployment: "testDeployment",
-					Stop:       false,
-					Host:       "test.example.com",
-					Folders:    []string{"/test/folder"},
+					Disabled:      true,
+					Name:          "test",
+					Namespace:     "testNamespace",
+					Deployment:    "testDeployment",
+					Stop:          false,
+					Host:          "test.example.com",
+					Folders:       []string{"/test/folder"},
+					SnapshotClass: "testSnapshotClass",
+					StorageClass:  "testStorageClass",
 				},
 			},
 			"testNamespace",
@@ -244,13 +256,45 @@ func TestProfilesFromYaml(t *testing.T) {
 
 			map[string]internal.Profile{
 				"test": {
-					Name:    "test",
-					Node:    "test-node.cluster",
-					Stop:    false,
-					Folders: []string{"/test/folder"},
+					Name:          "test",
+					Node:          "test-node.cluster",
+					Stop:          false,
+					Folders:       []string{"/test/folder"},
+					SnapshotClass: "testSnapshotClass",
+					StorageClass:  "testStorageClass",
 				},
 			},
 			"", // expCommandNamespace
+			"", // expFilepath
+		},
+		{
+			"snapshotClassOverride",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          snapshot-class: testSnapshotClassOverride
+          storage-class: testStorageClassOverride
+          deployment: testDeployment
+          host: test.example.com
+          folders:
+            - /test/folder
+      `,
+			"",
+
+			map[string]internal.Profile{
+				"test": {
+					Name:          "test",
+					Namespace:     "testNamespace",
+					Deployment:    "testDeployment",
+					Stop:          false,
+					Host:          "test.example.com",
+					Folders:       []string{"/test/folder"},
+					SnapshotClass: "testSnapshotClassOverride",
+					StorageClass:  "testStorageClassOverride",
+				},
+			},
+			"testNamespace",
 			"", // expFilepath
 		},
 	}
@@ -258,7 +302,17 @@ func TestProfilesFromYaml(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
 
-			profiles, errs := internal.ProfilesFromYamlString(tc.profileString, tc.profileFilter)
+			config := &internal.Config{
+				SnapshotClass: "testSnapshotClass",
+				StorageClass:  "testStorageClass",
+			}
+			configMap := &corev1.ConfigMap{
+				Data: map[string]string{
+					"profiles": tc.profileString,
+				},
+			}
+
+			profiles, errs := internal.ProfilesFromGlobalConfigMap(config, configMap, tc.profileFilter)
 			if len(errs) > 0 {
 				t.Fatalf("Error parsing yaml: %v", errs)
 			}
@@ -385,7 +439,15 @@ func TestProfilesFromYamlErrors(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			res, errs := internal.ProfilesFromYamlString(tc.profileString, "")
+
+			config := &internal.Config{}
+			configMap := &corev1.ConfigMap{
+				Data: map[string]string{
+					"profiles": tc.profileString,
+				},
+			}
+
+			res, errs := internal.ProfilesFromGlobalConfigMap(config, configMap, "")
 			if len(errs) == 0 {
 				t.Fatalf("Expected an error, but got nil")
 			}

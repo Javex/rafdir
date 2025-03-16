@@ -19,7 +19,6 @@ type BackupTarget interface {
 type PodBackupTarget struct {
 	Pod       *corev1.Pod
 	Namespace string
-	NodeName  string
 	Selector  string
 
 	pvc         *corev1.PersistentVolumeClaim
@@ -99,15 +98,9 @@ func NewBackupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Inte
 
 	pod := podList.Items[0]
 
-	nodeName := pod.Spec.NodeName
-	if nodeName == "" {
-		return nil, fmt.Errorf("pod %s has no node", pod.Name)
-	}
-
 	target := &PodBackupTarget{
 		Pod:       &pod,
 		Namespace: namespace,
-		NodeName:  nodeName,
 		Selector:  selector,
 
 		profile: profile,

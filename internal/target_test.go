@@ -34,7 +34,6 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 	type targetExpectation struct {
 		PodName   string
 		Namespace string
-		NodeName  string
 		Selector  string
 	}
 	tcs := []struct {
@@ -97,7 +96,6 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 			&targetExpectation{
 				PodName:   "testPod",
 				Namespace: "test",
-				NodeName:  "testNode",
 				Selector:  "testKeySelector=testValueSelector",
 			},
 			"",
@@ -197,49 +195,6 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 			"expected 1 pod, got 2",
 		},
 		{
-			"noNode",
-			"testDeployment",
-			&appsv1.Deployment{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "testDeployment",
-					Namespace: "test",
-				},
-				Spec: appsv1.DeploymentSpec{
-					Selector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"testKeySelector": "testValueSelector",
-						},
-					},
-				},
-			},
-			[]*corev1.Pod{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "testPod",
-						Namespace: "test",
-						Labels: map[string]string{
-							"testKeySelector": "testValueSelector",
-						},
-					},
-					Spec: corev1.PodSpec{
-						Volumes: []corev1.Volume{
-							{
-								Name: "testPvc",
-								VolumeSource: corev1.VolumeSource{
-									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-										ClaimName: "testPvc",
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			nil,
-			nil,
-			"pod testPod has no node",
-		},
-		{
 			"noPods",
 			"testDeployment",
 			&appsv1.Deployment{
@@ -323,7 +278,6 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 				resTarget := &targetExpectation{
 					PodName:   target.Pod.Name,
 					Namespace: target.Namespace,
-					NodeName:  target.NodeName,
 					Selector:  target.Selector,
 				}
 
@@ -339,7 +293,6 @@ func TestFindPvcAndVolumeMount(t *testing.T) {
 	type targetExpectation struct {
 		PodName   string
 		Namespace string
-		NodeName  string
 		Selector  string
 	}
 	tcs := []struct {

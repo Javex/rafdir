@@ -105,7 +105,7 @@ func ProfilesFromGlobalConfigMap(config *Config, globalConfigMap *corev1.ConfigM
 		}
 
 		if profile.StorageClass == "" {
-			profile.StorageClass = config.StorageClass
+			profile.StorageClass = config.DefaultStorageClass
 		}
 
 		// Validate the profile

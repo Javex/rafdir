@@ -1,13 +1,19 @@
+{{- $root := . }}
+{{- range $name, $config := .Values.storageClasses }}
+---
 kind: StorageClass
 apiVersion: storage.k8s.io/v1
 metadata:
-  name: {{ include "rafdir.name" . }}
+  name: {{ include "rafdir.name" $root }}-{{ $name }}
   labels:
-    {{- include "rafdir.labels" . | nindent 4}}
-provisioner: driver.longhorn.io
+    {{- include "rafdir.labels" $root | nindent 4}}
+provisioner: {{ $config.provisioner }}
 allowVolumeExpansion: false
 reclaimPolicy: Delete
-volumeBindingMode: Immediate
-parameters:
-  numberOfReplicas: "1"
-  dataLocality: "best-effort"
+volumeBindingMode: {{ $config.volumeBindingMode }}
+{{- if $config.mountOptions }}
+mountOptions:
+{{- toYaml $config.mountOptions | nindent 2 }}
+{{- end }}
+parameters: {{ $config.parameters | toYaml | nindent 2 }}
+{{- end }}

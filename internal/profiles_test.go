@@ -303,8 +303,8 @@ func TestProfilesFromYaml(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 
 			config := &internal.Config{
-				SnapshotClass: "testSnapshotClass",
-				StorageClass:  "testStorageClass",
+				SnapshotClass:       "testSnapshotClass",
+				DefaultStorageClass: "testStorageClass",
 			}
 			configMap := &corev1.ConfigMap{
 				Data: map[string]string{

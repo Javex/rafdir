@@ -18,16 +18,16 @@ type Config struct {
 	GlobalConfigFile string
 	SnapshotClass    string
 	BackupNamespace  string
-	// StorageClass is used for the temporary backup PVC which is different from
+	// DefaultStorageClass is used for the temporary backup PVC which is different from
 	// the default one. It should still be the same underlying provisioner/driver
 	// but, it can have different parameters. For example, it might not have any
 	// replication (replicas=1) because it's a temporary backup PVC.
-	StorageClass       string
-	SleepDuration      time.Duration
-	WaitTimeout        time.Duration
-	PodCreationTimeout time.Duration
-	PodWaitTimeout     time.Duration
-	Image              string
+	DefaultStorageClass string
+	SleepDuration       time.Duration
+	WaitTimeout         time.Duration
+	PodCreationTimeout  time.Duration
+	PodWaitTimeout      time.Duration
+	Image               string
 
 	Profiles     map[string]Profile
 	Repositories []Repository
@@ -54,16 +54,21 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 	}
 	log.Info("Loaded repositories")
 
+	defaultStorageClass, ok := configMap.Data["defaultStorageClass"]
+	if !ok {
+		return nil, fmt.Errorf("ConfigMap %s has no key `defaultStorageClass`", configMap.Name)
+	}
+
 	config := &Config{
-		GlobalConfigFile:   globalConfigFile,
-		SnapshotClass:      "longhorn",
-		BackupNamespace:    backupNamespace,
-		StorageClass:       "rafdir",
-		SleepDuration:      1 * time.Second,
-		WaitTimeout:        10 * time.Second,
-		PodCreationTimeout: 10 * time.Minute,
-		PodWaitTimeout:     20 * time.Minute,
-		Image:              "ghcr.io/javex/rafdir:latest",
+		GlobalConfigFile:    globalConfigFile,
+		SnapshotClass:       "longhorn",
+		BackupNamespace:     backupNamespace,
+		DefaultStorageClass: defaultStorageClass,
+		SleepDuration:       1 * time.Second,
+		WaitTimeout:         10 * time.Second,
+		PodCreationTimeout:  10 * time.Minute,
+		PodWaitTimeout:      20 * time.Minute,
+		Image:               "ghcr.io/javex/rafdir:latest",
 
 		Repositories: repositories,
 	}

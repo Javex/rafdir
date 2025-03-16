@@ -43,6 +43,7 @@ type Profile struct {
 	Namespace      string   `json:"namespace"`
 	Deployment     string   `json:"deployment"`
 	StatefulSet    string   `json:"statefulset"`
+	Selector       string   `json:"selector"`
 	Node           string   `json:"node"`
 	Stop           bool     `json:"stop"`
 	Host           string   `json:"host"`
@@ -145,12 +146,12 @@ func (p Profile) Validate() error {
 			return fmt.Errorf("Host is required for profile %s", p.Name)
 		}
 
-		if p.Deployment == "" && p.StatefulSet == "" {
-			return fmt.Errorf("Either Deployment, StatefulSet or Node is required for profile %s", p.Name)
+		if p.Deployment == "" && p.StatefulSet == "" && p.Selector == "" {
+			return fmt.Errorf("Either Deployment, StatefulSet, Selector or Node is required for profile %s", p.Name)
 		}
 
-		if p.Deployment != "" && p.StatefulSet != "" {
-			return fmt.Errorf("Only one of Deployment, StatefulSet or Node is allowed for profile %s", p.Name)
+		if p.Deployment != "" && p.StatefulSet != "" && p.Selector != "" {
+			return fmt.Errorf("Only one of Deployment, StatefulSet, Selector or Node is allowed for profile %s", p.Name)
 		}
 
 		if len(p.Folders) == 0 && p.StdInCommand == "" {
@@ -192,6 +193,10 @@ func (p Profile) validateNode() error {
 
 	if p.StatefulSet != "" {
 		return fmt.Errorf("StatefulSet is not allowed if node is specified for profile %s", p.Name)
+	}
+
+	if p.Selector != "" {
+		return fmt.Errorf("Selector is not allowed if node is specified for profile %s", p.Name)
 	}
 
 	if p.StdInCommand != "" {
@@ -271,11 +276,14 @@ func (p *Profile) BackupTarget(ctx context.Context, log *slog.Logger, kubeclient
 	} else if p.StatefulSet != "" {
 		log.Debug("Creating backup target from statefulset", "statefulset", p.StatefulSet)
 		target, err = NewBackupTargetFromStatefulSetName(ctx, log, kubeclient, p, runSuffix)
+	} else if p.Selector != "" {
+		log.Debug("Creating backup target from selector", "selector", p.Selector)
+		target, err = NewBackupTargetFromSelector(ctx, kubeclient, p.Namespace, p.Selector, p, runSuffix)
 	} else if p.Node != "" {
 		log.Debug("Creating backup target from node", "node", p.Node)
 		target, err = NewBackupTargetFromNodeName(ctx, kubeclient, p, runSuffix)
 	} else {
-		return nil, fmt.Errorf("Profile %s has no Deployment, StatefulSet or Node", p.Name)
+		return nil, fmt.Errorf("Profile %s has no Deployment, StatefulSet, Selector or Node", p.Name)
 	}
 
 	if err != nil {

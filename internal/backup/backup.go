@@ -47,14 +47,29 @@ type Backup struct {
 func (b *Backup) Validate() error {
 	if b.ProfilePath == "" {
 		return fmt.Errorf("ProfilePath cannot be empty")
+	} else if _, err := os.Stat(b.ProfilePath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("ProfilePath does not exist: %w", err)
+		}
+		return fmt.Errorf("Failed to stat ProfilePath: %w", err)
 	}
 
 	if b.ConfigFile == "" {
 		return fmt.Errorf("ConfigFile cannot be empty")
+	} else if _, err := os.Stat(b.ConfigFile); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("ConfigFile does not exist: %w", err)
+		}
+		return fmt.Errorf("Failed to stat ConfigFile: %w", err)
 	}
 
 	if b.CmdPath == "" {
 		return fmt.Errorf("CmdPath cannot be empty")
+	} else if _, err := os.Stat(b.CmdPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("CmdPath does not exist: %w", err)
+		}
+		return fmt.Errorf("Failed to stat CmdPath: %w", err)
 	}
 
 	// Return an error if only some of the stdin flags are set

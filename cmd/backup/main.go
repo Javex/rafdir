@@ -18,6 +18,10 @@ import (
 func rootRun(backup *backup.Backup) error {
 	cli.InitLogging(slog.LevelDebug)
 
+	if err := backup.Validate(); err != nil {
+		return fmt.Errorf("Invalid backup configuration: %s", err)
+	}
+
 	errs := backup.Run()
 	if len(errs) > 0 {
 		// Handle errors

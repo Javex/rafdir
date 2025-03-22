@@ -452,7 +452,7 @@ func (s *SnapshotClient) NewBackupPod(podName, runSuffix string) *corev1.Pod {
 					ImagePullPolicy: corev1.PullAlways,
 					Command:         []string{"/usr/bin/rafdir-backup"},
 					VolumeMounts: []corev1.VolumeMount{
-						{Name: "restic-cache", MountPath: "/var/cache/restic"},
+						{Name: "cache", MountPath: "/var/cache"},
 						{Name: "nfs-restic-repo", MountPath: "/mnt/restic-repo"},
 					},
 
@@ -501,7 +501,7 @@ func (s *SnapshotClient) NewBackupPod(podName, runSuffix string) *corev1.Pod {
 
 			Volumes: []corev1.Volume{
 				{
-					Name: "restic-cache",
+					Name: "cache",
 					VolumeSource: corev1.VolumeSource{
 						EmptyDir: &corev1.EmptyDirVolumeSource{},
 					},

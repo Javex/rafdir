@@ -1,7 +1,7 @@
 package backup
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -36,6 +36,10 @@ type Backup struct {
 	// file is saved in the first folder which is this option.
 	StdInFilepath string
 
+	// CacheDir is a path where files can be written to avoid keeping them in
+	// memory. Usually something like /var/cache/
+	CacheDir string
+
 	KubernetesClient kubernetes.Interface
 	Kubeconfig       *rest.Config
 }
@@ -68,6 +72,13 @@ func (b *Backup) Validate() error {
 		return fmt.Errorf("Kubeconfig cannot be nil")
 	}
 
+	if _, err := os.Stat(b.CacheDir); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("CacheDir does not exist: %w", err)
+		}
+		return fmt.Errorf("Failed to stat CacheDir: %w", err)
+	}
+
 	return nil
 }
 
@@ -80,16 +91,17 @@ func (b *Backup) Run() []error {
 	}
 
 	// If there's a stdin command to run, run it and return
-	var stdout *bytes.Buffer
+	var stdoutPath string
 	if b.StdInPod != "" {
 		ctx := context.Background()
-		stdout, err = backupExec.ExecuteCommandInPod(
+		stdoutPath, err = backupExec.ExecuteCommandInPod(
 			ctx,
 			b.KubernetesClient,
 			b.Kubeconfig,
 			b.StdInPod,
 			b.StdInNamespace,
 			b.StdInCommand,
+			b.CacheDir,
 		)
 
 		if err != nil {
@@ -99,21 +111,34 @@ func (b *Backup) Run() []error {
 	}
 
 	errs := make([]error, 0)
-	var stdoutReader *bytes.Reader
+	var stdoutReader *bufio.Reader
+	var stdoutFile *os.File
 	var reader io.Reader
-	if stdout != nil {
+	if stdoutPath != "" {
 		log.Debug("Have stdout from stdin command")
-		// If StdInFilepath is set, save the stdout to a file, otherwise provide it
+
+		// If StdInFilepath is set, move the stdout file, otherwise provide it
 		// directly to resticprofile as stdin.
 		if b.StdInFilepath != "" {
-			if err := os.WriteFile(b.StdInFilepath, stdout.Bytes(), 0644); err != nil {
-				log.Error("Failed to write file", "error", err, "filepath", b.StdInFilepath)
+			// Move file
+			if err := os.Rename(stdoutPath, b.StdInFilepath); err != nil {
+				log.Error("Failed to move file", "error", err, "from", stdoutPath, "to", b.StdInFilepath)
 				return []error{err}
 			}
-			log.Debug("Wrote file", "filepath", b.StdInFilepath)
+			log.Debug("Moved file", "source", stdoutPath, "filepath", b.StdInFilepath)
 		} else {
-			stdoutReader = bytes.NewReader(stdout.Bytes())
-			log.Debug("Created reader from stdout to pass as stdin to resticprofile")
+
+			// Open the file that contains stdout data
+			var err error
+			stdoutFile, err = os.Open(stdoutPath)
+			if err != nil {
+				log.Error("Failed to open file", "error", err, "filepath", stdoutPath)
+				return []error{err}
+			}
+			defer stdoutFile.Close()
+
+			stdoutReader = bufio.NewReader(stdoutFile)
+			log.Debug("Opened file for stdout to pass as stdin to resticprofile")
 		}
 	}
 
@@ -121,10 +146,12 @@ func (b *Backup) Run() []error {
 		log = log.With("profile", profile)
 		log.Info("Starting backup")
 
-		if stdoutReader != nil {
+		if stdoutFile != nil {
 			log.Debug("Resetting reader to beginning of buffer")
-			// Reset the reader to the beginning of the buffer
-			stdoutReader.Seek(0, 0)
+			// Reset file reader to the beginning of the file
+			stdoutFile.Seek(0, 0)
+			// Wrap in a new buffered reader
+			stdoutReader = bufio.NewReader(stdoutFile)
 			// This needs to be explicitly assigned to an interface type which *can*
 			// be nil. If the stdoutReader is directly passed to the runResticprofile
 			// function, the nil check won't work due to some Go interface

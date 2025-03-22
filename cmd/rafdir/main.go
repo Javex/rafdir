@@ -14,6 +14,7 @@ func addFlags(cmd *cobra.Command, clientConfig *rafdir.SnapshotClientConfig) {
 	cmd.Flags().StringVarP(&clientConfig.ConfigMapName, "config-map-name", "c", "rafdir-config", "Name of ConfigMap that contains main backup config")
 	cmd.Flags().StringVarP(&clientConfig.LogLevel, "log-level", "l", "INFO", "Log level, case-insensitive. Accepts debug, info, warn and error.")
 	cmd.Flags().StringVarP(&clientConfig.ProfileFilter, "profile", "p", "", "Only back up a single profile. By default all profiles are updated. Value must be the name of a profile in the ConfigMap")
+	cmd.Flags().StringVarP(&clientConfig.RepoFilter, "repository", "r", "", "Only back up profiles for a single repository. By default all repositories get a backup. Value must be the name of a repo in the ConfigMap.")
 }
 
 func rootRun(clientConfig *rafdir.SnapshotClientConfig) error {

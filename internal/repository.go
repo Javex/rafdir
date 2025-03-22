@@ -13,7 +13,7 @@ type Repository struct {
 	ProfileYaml string
 }
 
-func RepositoriesFromConfigMap(configMap *corev1.ConfigMap) ([]Repository, error) {
+func RepositoriesFromConfigMap(configMap *corev1.ConfigMap, repoFilter string) ([]Repository, error) {
 	// Get the keys out of the first level of yaml data, ignoring any fields
 	// inside, only getting the key names.
 	repoYaml, ok := configMap.Data["repositories"]
@@ -37,6 +37,12 @@ func RepositoriesFromConfigMap(configMap *corev1.ConfigMap) ([]Repository, error
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal repo value as string %s: %v", repoName, err)
 		}
+
+		// If repo filter is set skip all repos that don't match
+		if repoFilter != "" && repoFilter != repoName {
+			continue
+		}
+
 		repo := Repository{
 			Name:        RepositoryName(repoName),
 			ProfileYaml: string(profileYaml),

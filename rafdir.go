@@ -29,6 +29,7 @@ type SnapshotClientConfig struct {
 	ConfigMapName string
 	LogLevel      string
 	ProfileFilter string
+	RepoFilter    string
 }
 
 func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, error) {
@@ -90,6 +91,7 @@ func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, erro
 		s.Namespace,
 		s.ConfigMapName,
 		s.ProfileFilter,
+		s.RepoFilter,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to load global configmap: %s", err)

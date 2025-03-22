@@ -12,6 +12,7 @@ func TestRepositoriesFromConfigMap(t *testing.T) {
 	tcs := []struct {
 		name            string
 		configMap       *corev1.ConfigMap
+		repoFilter      string
 		expRepositories []internal.Repository
 		isErr           bool
 	}{
@@ -20,6 +21,7 @@ func TestRepositoriesFromConfigMap(t *testing.T) {
 			&corev1.ConfigMap{
 				Data: map[string]string{},
 			},
+			"",
 			nil,
 			true,
 		},
@@ -30,6 +32,7 @@ func TestRepositoriesFromConfigMap(t *testing.T) {
 					"repositories": "",
 				},
 			},
+			"",
 			nil,
 			true,
 		},
@@ -40,6 +43,7 @@ func TestRepositoriesFromConfigMap(t *testing.T) {
 					"repositories": "1",
 				},
 			},
+			"",
 			nil,
 			true,
 		},
@@ -54,6 +58,7 @@ repo1:
 `,
 				},
 			},
+			"",
 			[]internal.Repository{
 				{
 					Name: "repo1",
@@ -78,6 +83,7 @@ repo2:
 `,
 				},
 			},
+			"",
 			[]internal.Repository{
 				{
 					Name: "repo1",
@@ -95,6 +101,31 @@ repository: differentS3Url
 			false,
 		},
 		{
+			"TwoRepositoriesWithFilter",
+			&corev1.ConfigMap{
+				Data: map[string]string{
+					"repositories": `
+repo1:
+  inherit: baseRepo
+  repository: someS3Url
+repo2:
+  inherit: baseRepo
+  repository: differentS3Url
+`,
+				},
+			},
+			"repo1",
+			[]internal.Repository{
+				{
+					Name: "repo1",
+					ProfileYaml: `inherit: baseRepo
+repository: someS3Url
+`,
+				},
+			},
+			false,
+		},
+		{
 			"RepositoryWithNestedValues",
 			&corev1.ConfigMap{
 				Data: map[string]string{
@@ -105,6 +136,7 @@ repo1:
     limit-upload: "123"`,
 				},
 			},
+			"",
 			[]internal.Repository{
 				{
 					Name: "repo1",
@@ -120,7 +152,7 @@ inherit: baseRepo
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			repos, err := internal.RepositoriesFromConfigMap(tc.configMap)
+			repos, err := internal.RepositoriesFromConfigMap(tc.configMap, tc.repoFilter)
 			if err != nil && !tc.isErr {
 				t.Fatalf("unexpected error: %v", err)
 			}

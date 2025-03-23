@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -19,8 +22,6 @@ type NodeBackupTarget struct {
 }
 
 func (n *NodeBackupTarget) PodName() string {
-	// TODO: Normalise pod name to fix this warning:
-	// metadata.name: this is used in the Pod's hostname, which can result in surprising behavior; a DNS label is recommended: [must not contain dots]
 	return n.podName
 }
 
@@ -89,10 +90,42 @@ func NewBackupTargetFromNodeName(ctx context.Context, kubeclient kubernetes.Inte
 		return nil, err
 	}
 
+	podName, err := createPodName(profile.Name, node.Name, runSuffix)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create pod name: %w", err)
+	}
+
 	return &NodeBackupTarget{
 		node:    node,
 		client:  kubeclient,
 		profile: profile,
-		podName: fmt.Sprintf("%s-%s-%s", profile.Name, node.Name, runSuffix),
+		podName: podName,
 	}, nil
+}
+
+func createPodName(profileName, nodeName, runSuffix string) (string, error) {
+	// ConvertToValidPodName converts an input string into a valid Kubernetes pod name.
+	// Replace non-alphanumeric and non-hyphen characters with hyphens
+	podName := fmt.Sprintf("%s-%s-%s", profileName, nodeName, runSuffix)
+	re := regexp.MustCompile("[^a-z0-9-]")
+	podName = re.ReplaceAllString(podName, "-")
+
+	// Ensure the name starts and ends with an alphanumeric character
+	podName = strings.Trim(podName, "-")
+
+	// Convert the name to lowercase
+	podName = strings.ToLower(podName)
+
+	// Ensure the name is not longer than 63 characters
+	if len(podName) > 63 {
+		podName = podName[:63]
+	}
+
+	// Check if the resulting name is a valid DNS subdomain (which applies to Kubernetes pod names)
+	if errs := validation.IsDNS1123Subdomain(podName); len(errs) > 0 {
+		err := fmt.Errorf("Invalid pod name: %v", errs)
+		return "", err
+	}
+
+	return podName, nil
 }

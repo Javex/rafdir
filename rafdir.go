@@ -219,6 +219,9 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 
 	backupPod := s.NewBackupPod(podName, runSuffix)
 
+	// Add label with profile name to backup pod
+	backupPod.Labels["rafdir/profile"] = profile.Name
+
 	if profile.StdInCommand != "" {
 		// TODO: This logic should not be here but inside profile. Currently the
 		// Profile.StdInTarget function is a good place to handle this, but the

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	backupExec "rafdir/internal/backup/exec"
@@ -112,16 +113,34 @@ func (b *Backup) Run() []error {
 	// If there's a stdin command to run, run it and return
 	var stdoutPath string
 	if b.StdInPod != "" {
+
+		if b.StdInFilepath == "" {
+			// If there's no filepath to save the output of the command, save it in
+			// the cache directory
+			stdoutPath = filepath.Join(b.CacheDir, fmt.Sprintf("%s.stdout", b.StdInPod))
+		} else {
+			// If there's a filepath to save the output of the command, save it there
+			// This avoid having to copy it around afterwards.
+			stdoutPath = b.StdInFilepath
+		}
+
+		stdOutFile, err := newBufferedFile(stdoutPath)
+		if err != nil {
+			return []error{fmt.Errorf("Failed to create buffered file: %w", err)}
+		}
+
 		ctx := context.Background()
-		stdoutPath, err = backupExec.ExecuteCommandInPod(
+		err = backupExec.ExecuteCommandInPod(
 			ctx,
 			b.KubernetesClient,
 			b.Kubeconfig,
 			b.StdInPod,
 			b.StdInNamespace,
 			b.StdInCommand,
-			b.CacheDir,
+			stdOutFile.bufferedFileWriter,
 		)
+
+		stdOutFile.close()
 
 		if err != nil {
 			log.Error("Failed to run stdin command", "error", err)
@@ -136,17 +155,10 @@ func (b *Backup) Run() []error {
 	if stdoutPath != "" {
 		log.Debug("Have stdout from stdin command")
 
-		// If StdInFilepath is set, move the stdout file, otherwise provide it
-		// directly to resticprofile as stdin.
-		if b.StdInFilepath != "" {
-			// Move file
-			if err := os.Rename(stdoutPath, b.StdInFilepath); err != nil {
-				log.Error("Failed to move file", "error", err, "from", stdoutPath, "to", b.StdInFilepath)
-				return []error{err}
-			}
-			log.Debug("Moved file", "source", stdoutPath, "filepath", b.StdInFilepath)
-		} else {
-
+		// If StdInFilepath is set, then the file is already in the right place.
+		// Otherwise, open the file and pass it to the resticprofile command as
+		// stdin.
+		if b.StdInFilepath == "" {
 			// Open the file that contains stdout data
 			var err error
 			stdoutFile, err = os.Open(stdoutPath)
@@ -245,4 +257,33 @@ func (b *Backup) runResticprofile(profile string, stdout io.Reader) error {
 	}
 
 	return nil
+}
+
+type bufferedFile struct {
+	rawFile            *os.File
+	bufferedFileWriter *bufio.Writer
+}
+
+func newBufferedFile(filePath string) (*bufferedFile, error) {
+	log := slog.Default()
+
+	// Create a file to store the command output
+	rawFile, err := os.Create(filePath)
+	log.Info("Creating file", "file", filePath)
+	if err != nil {
+		log.Error("Failed to create file", "error", err)
+		return nil, fmt.Errorf("Failed to create file: %w", err)
+	}
+
+	// Create a buffered writer for efficient writing
+	bufferedFileWriter := bufio.NewWriter(rawFile)
+	return &bufferedFile{
+		rawFile:            rawFile,
+		bufferedFileWriter: bufferedFileWriter,
+	}, nil
+}
+
+func (c *bufferedFile) close() {
+	c.bufferedFileWriter.Flush()
+	c.rawFile.Close()
 }

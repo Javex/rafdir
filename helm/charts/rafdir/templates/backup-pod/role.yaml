@@ -1,13 +1,18 @@
 # This file contains a Role & RoleBinding for each namespace that the backup
 # pod should run commands in to take command-based backups.
+{{- $namespaces := dict }}
+{{- range $name, $profile := .Values.profiles }}
+  {{- if (index $profile "stdin-command") }}
+    {{ $namespace := or (index $profile "stdin-namespace") $profile.namespace }}
+    {{- $_ := set $namespaces $namespace true }}
+  {{- end }}
+{{- end }}
 {{- $root := . }}
-{{- range $profileName, $profile := .Values.profiles }}
-{{ $namespace := or (index $profile "stdin-namespace") $profile.namespace }}
-{{- if (index $profile "stdin-command") }}
+{{- range $namespace, $_ := $namespaces }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "rafdir.name" $root }}-{{ $profileName }}-backup
+  name: {{ include "rafdir.name" $root }}-backup
   namespace: {{ $namespace }}
   labels:
     {{- include "rafdir.labels" $root | nindent 4 }}
@@ -19,18 +24,17 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "rafdir.name" $root }}-{{ $profileName }}-backup
+  name: {{ include "rafdir.name" $root }}-backup
   namespace: {{ $namespace }}
   labels:
     {{- include "rafdir.labels" $root | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ include "rafdir.name" $root }}-{{ $profileName }}-backup
+  name: {{ include "rafdir.name" $root }}-backup
 subjects:
   - kind: ServiceAccount
     name: {{ include "rafdir.name" $root }}-backup
     namespace: {{ $root.Release.Namespace }}
 ---
-{{- end }}
 {{- end }}

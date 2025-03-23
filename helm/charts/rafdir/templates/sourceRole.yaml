@@ -1,13 +1,23 @@
 # This file contains a Role & RoleBinding for each namespace that the backup
-# service should access and read PVCs from.
+# service should access and read PVCs from.{{- $namespaces := dict }}
+{{- range $name, $profile := .Values.profiles }}
+  {{- if not (empty $profile.namespace) }}
+    {{- if not (hasKey $namespaces $profile.namespace) }}
+      {{- $_ := set $namespaces $profile.namespace (dict "stop" false) }}
+    {{- end }}
+
+    {{- if and (hasKey $profile "stop") $profile.stop }}
+      {{- $_ := set (index $namespaces $profile.namespace) "stop" true }}
+    {{- end }}
+  {{- end }}
+{{- end }}
 {{- $root := . }}
-{{- range $profileName, $profile := .Values.profiles }}
-{{- if not (empty $profile.namespace) }}
+{{- range $namespace, $nsData := $namespaces }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "rafdir.name" $root }}-{{ $profileName }}
-  namespace: {{ $profile.namespace }}
+  name: {{ include "rafdir.name" $root }}
+  namespace: {{ $namespace }}
   labels:
     {{- include "rafdir.labels" $root | nindent 4 }}
 rules:
@@ -28,7 +38,7 @@ rules:
     verbs:
       - get
       - list
-  {{- if $profile.stop }}
+  {{- if $nsData.stop }}
   - apiGroups: ["apps"]
     resources: ["deployments/scale"]
     verbs: ["get", "update"]
@@ -46,18 +56,17 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "rafdir.name" $root }}-{{ $profileName }}
-  namespace: {{ $profile.namespace }}
+  name: {{ include "rafdir.name" $root }}
+  namespace: {{ $namespace }}
   labels:
     {{- include "rafdir.labels" $root | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ include "rafdir.name" $root }}-{{ $profileName }}
+  name: {{ include "rafdir.name" $root }}
 subjects:
   - kind: ServiceAccount
     name: {{ include "rafdir.name" $root }}
     namespace: {{ $root.Release.Namespace }}
 ---
-{{- end }}
 {{- end }}

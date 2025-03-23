@@ -23,15 +23,23 @@ func rootRun(backup *backup.Backup) error {
 	}
 
 	errs := backup.Run()
+	var err error = nil
 	if len(errs) > 0 {
 		// Handle errors
 		errStrings := make([]string, len(errs))
 		for i, err := range errs {
 			errStrings[i] = err.Error()
 		}
-		return fmt.Errorf("Errors while tacking backup: %s", strings.Join(errStrings, ", "))
+		err = fmt.Errorf("Errors while tacking backup: %s", strings.Join(errStrings, ", "))
 	}
-	return nil
+	if backup.Pause {
+		fmt.Println("Backup paused...")
+		if err != nil {
+			fmt.Println(fmt.Sprintf("There are errors: %s", err))
+		}
+		select {}
+	}
+	return err
 }
 
 func addFlags(cmd *cobra.Command, backup *backup.Backup) error {
@@ -44,6 +52,7 @@ func addFlags(cmd *cobra.Command, backup *backup.Backup) error {
 	cmd.Flags().StringVarP(&backup.StdInCommand, "stdin-command", "", "", "Command to run to get the backup data")
 	cmd.Flags().StringVarP(&backup.StdInFilepath, "stdin-filepath", "", "", "Destination path where to save file from running StdInCommand")
 	cmd.Flags().StringVarP(&backup.CacheDir, "cache-dir", "", "/var/cache/", "Cache directory to put files such as the output of a stdin-command.")
+	cmd.Flags().BoolVarP(&backup.Pause, "pause", "P", false, "Pause the backup process right before exising the process. This is useful for debugging.")
 
 	var kubeClient *kubernetes.Clientset
 	var cfg *rest.Config

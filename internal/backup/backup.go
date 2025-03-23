@@ -40,6 +40,10 @@ type Backup struct {
 	// memory. Usually something like /var/cache/
 	CacheDir string
 
+	// Pause indicates whether to pause the backup process right before exiting
+	// the process. This is useful for debugging.
+	Pause bool
+
 	KubernetesClient kubernetes.Interface
 	Kubeconfig       *rest.Config
 }

@@ -451,6 +451,10 @@ func (s *SnapshotClient) NewBackupPod(podName, runSuffix string) *corev1.Pod {
 					Image:           s.config.Image,
 					ImagePullPolicy: corev1.PullAlways,
 					Command:         []string{"/usr/bin/rafdir-backup"},
+					// Enable this argument to debug a backup pod. The backup will run
+					// until the end and then pause, printing whether there was an error
+					// or not.
+					// Args: []string{"--pause"},
 					VolumeMounts: []corev1.VolumeMount{
 						{Name: "cache", MountPath: "/var/cache"},
 						{Name: "nfs-restic-repo", MountPath: "/mnt/restic-repo"},
@@ -526,7 +530,8 @@ func (s *SnapshotClient) NewBackupPod(podName, runSuffix string) *corev1.Pod {
 
 func AddStdInCommandArgs(pod *corev1.Pod, profile *internal.Profile, stdinPod string) {
 	pod.Spec.ServiceAccountName = "rafdir-backup"
-	pod.Spec.Containers[0].Args = []string{
+
+	args := []string{
 		"--stdin-pod",
 		stdinPod,
 		"--stdin-namespace",
@@ -536,8 +541,11 @@ func AddStdInCommandArgs(pod *corev1.Pod, profile *internal.Profile, stdinPod st
 	}
 
 	if path := profile.StdInFilepath(); path != "" {
-		pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, "--stdin-filepath", path)
+		args = append(args, "--stdin-filepath", path)
 	}
+
+	// Append all arguments to pod spec
+	pod.Spec.Containers[0].Args = append(pod.Spec.Containers[0].Args, args...)
 }
 
 func (s *SnapshotClient) AddPvcToPod(pod *corev1.Pod, volumeMount *corev1.VolumeMount, sourcePvcName string) {

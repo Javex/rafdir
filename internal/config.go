@@ -33,16 +33,16 @@ type Config struct {
 	Repositories []Repository
 }
 
-func LoadConfigFromKubernetes(ctx context.Context, log *slog.Logger, kubeClient kubernetes.Interface, namespace string, configMapName string, profileFilter, repoFilter string) (*Config, error) {
+func LoadConfigFromKubernetes(ctx context.Context, log *slog.Logger, kubeClient kubernetes.Interface, namespace string, configMapName string, profileFilter, repoFilter, imageTag string) (*Config, error) {
 	cm, err := kubeClient.CoreV1().ConfigMaps(namespace).Get(ctx, configMapName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get global configmap %s: %w", configMapName, err)
 	}
 	log.Info("Loaded global ConfigMap")
-	return NewConfigFromConfigMap(log, namespace, cm, profileFilter, repoFilter)
+	return NewConfigFromConfigMap(log, namespace, cm, profileFilter, repoFilter, imageTag)
 }
 
-func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap *corev1.ConfigMap, profileFilter, repoFilter string) (*Config, error) {
+func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap *corev1.ConfigMap, profileFilter, repoFilter, imageTag string) (*Config, error) {
 	globalConfigFile, ok := configMap.Data["profiles.yaml"]
 	if !ok {
 		return nil, fmt.Errorf("ConfigMap %s has no key `profiles.yaml`", configMap.Name)
@@ -59,6 +59,9 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 		return nil, fmt.Errorf("ConfigMap %s has no key `defaultStorageClass`", configMap.Name)
 	}
 
+	image := fmt.Sprintf("ghcr.io/javex/rafdir:%s", imageTag)
+	log.Info("Using image", "image", image)
+
 	config := &Config{
 		GlobalConfigFile:    globalConfigFile,
 		SnapshotClass:       "longhorn",
@@ -68,7 +71,7 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 		WaitTimeout:         10 * time.Second,
 		PodCreationTimeout:  10 * time.Minute,
 		PodWaitTimeout:      20 * time.Minute,
-		Image:               "ghcr.io/javex/rafdir:latest",
+		Image:               image,
 
 		Repositories: repositories,
 	}

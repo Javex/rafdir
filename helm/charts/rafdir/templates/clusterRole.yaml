@@ -9,7 +9,7 @@ rules:
     resources: ["storageclasses"]
     verbs: ["get", "list"]
   - apiGroups: ["snapshot.storage.k8s.io"]
-    resources: ["volumesnapshotcontents"]
+    resources: ["volumesnapshotcontents", "volumesnapshotclasses"]
     verbs: ["get", "list", "create"]
   - apiGroups: [""]
     resources: ["nodes"]

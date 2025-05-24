@@ -221,6 +221,8 @@ func (s *PvcSnapshotter) verifyDriver(ctx context.Context) error {
 		return fmt.Errorf("Storage class driver %s does not match snapshot driver %s", storageClassObj.Provisioner, s.snapshotDriver)
 	}
 
+	s.log.Debug("Driver verified to match storage class & snapshot class")
+
 	return nil
 }
 

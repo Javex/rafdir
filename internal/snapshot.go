@@ -90,6 +90,10 @@ func (s *PvcSnapshotter) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *
 	}
 	s.snapshotDriver = snapshotDriver
 
+	if err := s.verifyDriver(ctx); err != nil {
+		return nil, fmt.Errorf("Failed to verify driver: %w", err)
+	}
+
 	s.sourceNamespace = sourcePvc.Namespace
 	pvcName := sourcePvc.Name
 	snapshotName := fmt.Sprintf("%s-snapshot-%s", pvcName, s.runSuffix)
@@ -182,6 +186,42 @@ func (s *PvcSnapshotter) storageDriverFromPvc(ctx context.Context, pvc *corev1.P
 	}
 
 	return storageClassObj.Provisioner, nil
+}
+
+// verifyDriver makes sure that the driver of the snapshot class, storage class
+// and source PVC match
+func (s *PvcSnapshotter) verifyDriver(ctx context.Context) error {
+	if s.snapshotDriver == "" {
+		return fmt.Errorf("Snapshot driver is not set")
+	}
+
+	// Get driver for snapshot class
+	snapshotClassObj, err := s.csiClient.SnapshotV1().
+		VolumeSnapshotClasses().
+		Get(ctx, s.snapshotClass, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("Failed to get snapshot class: %w", err)
+	}
+
+	if snapshotClassObj.Driver != s.snapshotDriver {
+		s.log.Error("Snapshot class driver does not match snapshot driver", "snapshotClassDriver", snapshotClassObj.Driver, "snapshotDriver", s.snapshotDriver)
+		return fmt.Errorf("Snapshot class driver %s does not match snapshot driver %s", snapshotClassObj.Driver, s.snapshotDriver)
+	}
+
+	// Get driver for storage class
+	storageClassObj, err := s.kubeClient.StorageV1().
+		StorageClasses().
+		Get(ctx, s.storageClass, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("Failed to get storage class: %w", err)
+	}
+
+	if storageClassObj.Provisioner != s.snapshotDriver {
+		s.log.Error("Storage class driver does not match snapshot driver", "storageClassDriver", storageClassObj.Provisioner, "snapshotDriver", s.snapshotDriver)
+		return fmt.Errorf("Storage class driver %s does not match snapshot driver %s", storageClassObj.Provisioner, s.snapshotDriver)
+	}
+
+	return nil
 }
 
 func (s *PvcSnapshotter) takeSnapshot(ctx context.Context, snapshotName string, pvcName string) (*volumesnapshot.VolumeSnapshot, error) {

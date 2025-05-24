@@ -275,12 +275,13 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 		}
 
 		snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
-			DestNamespace: s.config.BackupNamespace,
-			RunSuffix:     runSuffix,
-			SnapshotClass: profile.SnapshotClass,
-			StorageClass:  profile.StorageClass,
-			WaitTimeout:   s.config.WaitTimeout,
-			SleepDuration: s.config.SleepDuration,
+			DestNamespace:          s.config.BackupNamespace,
+			RunSuffix:              runSuffix,
+			SnapshotClass:          profile.SnapshotClass,
+			StorageClass:           profile.StorageClass,
+			WaitTimeout:            s.config.WaitTimeout,
+			SnapshotContentTimeout: s.config.SnapshotContentTimeout,
+			SleepDuration:          s.config.SleepDuration,
 		})
 		// Schedule cleanup before kicking off the resource creation. If no
 		// resources end up being created this does nothing.

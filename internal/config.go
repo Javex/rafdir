@@ -23,11 +23,28 @@ type Config struct {
 	// but, it can have different parameters. For example, it might not have any
 	// replication (replicas=1) because it's a temporary backup PVC.
 	DefaultStorageClass string
-	SleepDuration       time.Duration
-	WaitTimeout         time.Duration
-	PodCreationTimeout  time.Duration
-	PodWaitTimeout      time.Duration
-	Image               string
+	// SleepDuration is the time to wait between API calls to the cluster when
+	// checking if an operation has completed, so it determines the polling
+	// frequency. It should be a low number, but not so low as to overwhelm the
+	// cluster.
+	SleepDuration time.Duration
+	// WaitTimeout is a brief period of time to wait for most activities
+	// performed against the cluster such as object creation.
+	WaitTimeout time.Duration
+	// SnapshotContentTimeout is the maximum time to wait for the snapshot
+	// content to be ready for a snapshot. This is when data is actually handled
+	// and storage providers have to do some work so it could be a bit longer
+	// than regular cluster activities.
+	SnapshotContentTimeout time.Duration
+	// PodCreationTimeout is a longer duration that gives more time to the
+	// cluster for pods to actually start. This can take a while if storage
+	// providers need to get stuff ready at this stage.
+	PodCreationTimeout time.Duration
+	// PodWaitTimeout is the maximum time to wait for a pod to actually perform
+	// the backup. This is the task that could take the longest because it
+	// actually backs data up.
+	PodWaitTimeout time.Duration
+	Image          string
 
 	Profiles     map[string]Profile
 	Repositories []Repository
@@ -63,15 +80,16 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 	log.Info("Using image", "image", image)
 
 	config := &Config{
-		GlobalConfigFile:    globalConfigFile,
-		SnapshotClass:       "longhorn",
-		BackupNamespace:     backupNamespace,
-		DefaultStorageClass: defaultStorageClass,
-		SleepDuration:       1 * time.Second,
-		WaitTimeout:         10 * time.Second,
-		PodCreationTimeout:  10 * time.Minute,
-		PodWaitTimeout:      20 * time.Minute,
-		Image:               image,
+		GlobalConfigFile:       globalConfigFile,
+		SnapshotClass:          "longhorn",
+		BackupNamespace:        backupNamespace,
+		DefaultStorageClass:    defaultStorageClass,
+		SleepDuration:          1 * time.Second,
+		WaitTimeout:            10 * time.Second,
+		SnapshotContentTimeout: 5 * time.Minute,
+		PodCreationTimeout:     10 * time.Minute,
+		PodWaitTimeout:         20 * time.Minute,
+		Image:                  image,
 
 		Repositories: repositories,
 	}

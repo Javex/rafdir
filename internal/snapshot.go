@@ -33,8 +33,9 @@ type PvcSnapshotterConfig struct {
 	// StorageClass is the name of the StorageClass used for the temporary PVC.
 	StorageClass string
 
-	WaitTimeout   time.Duration
-	SleepDuration time.Duration
+	WaitTimeout            time.Duration
+	SnapshotContentTimeout time.Duration
+	SleepDuration          time.Duration
 }
 
 type PvcSnapshotter struct {
@@ -43,8 +44,9 @@ type PvcSnapshotter struct {
 	snapshotClass string
 	storageClass  string
 
-	waitTimeout   time.Duration
-	sleepDuration time.Duration
+	waitTimeout            time.Duration
+	snapshotContentTimeout time.Duration
+	sleepDuration          time.Duration
 
 	kubeClient kubernetes.Interface
 	csiClient  csiClientset.Interface
@@ -67,8 +69,9 @@ func NewPvcSnapshotter(log *slog.Logger, kubeClient kubernetes.Interface, csiCli
 		snapshotClass: cfg.SnapshotClass,
 		storageClass:  cfg.StorageClass,
 
-		waitTimeout:   cfg.WaitTimeout,
-		sleepDuration: cfg.SleepDuration,
+		waitTimeout:            cfg.WaitTimeout,
+		snapshotContentTimeout: cfg.SnapshotContentTimeout,
+		sleepDuration:          cfg.SleepDuration,
 
 		kubeClient: kubeClient,
 		csiClient:  csiClient,
@@ -348,7 +351,7 @@ func (s *PvcSnapshotter) snapshotContentFromHandle(ctx context.Context, snapshot
 }
 
 func (s *PvcSnapshotter) waitSnapContent(ctx context.Context, snapshot *volumesnapshot.VolumeSnapshot) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, s.waitTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.snapshotContentTimeout)
 	defer cancel()
 	namespace := snapshot.ObjectMeta.Namespace
 	snapshotName := snapshot.ObjectMeta.Name

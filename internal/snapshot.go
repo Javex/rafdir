@@ -390,21 +390,31 @@ func (s *PvcSnapshotter) deleteSnapshotContent(ctx context.Context, snapshotCont
 }
 
 func (s *PvcSnapshotter) snapshotHandleFromContent(ctx context.Context, contentName string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, s.waitTimeout)
+	defer cancel()
 	for {
-		snapshotContent, err := s.csiClient.SnapshotV1().
-			VolumeSnapshotContents().
-			Get(ctx, contentName, metav1.GetOptions{})
-		if err != nil {
-			return "", fmt.Errorf("Error getting snapshotContent: %w", err)
-		}
+		select {
+		case <-ctx.Done():
+			s.log.Error("Timed out waiting to get snapshot handle from content")
+			return "", fmt.Errorf("Timeout")
 
-		if snapshotContent.Status != nil && snapshotContent.Status.SnapshotHandle != nil {
-			s.log.Info("SnapshotHandle is ready", "contentName", contentName, "SnapshotHandle", *snapshotContent.Status.SnapshotHandle)
-			return *snapshotContent.Status.SnapshotHandle, nil
-		}
+		default:
+			snapshotContent, err := s.csiClient.SnapshotV1().
+				VolumeSnapshotContents().
+				Get(ctx, contentName, metav1.GetOptions{})
+			if err != nil {
+				return "", fmt.Errorf("Error getting snapshotContent: %w", err)
+			}
 
-		s.log.Debug("SnapshotHandle is not ready yet", "contentName", contentName)
-		time.Sleep(s.sleepDuration)
+			if snapshotContent.Status != nil && snapshotContent.Status.SnapshotHandle != nil {
+				s.log.Info("SnapshotHandle is ready", "contentName", contentName, "SnapshotHandle", *snapshotContent.Status.SnapshotHandle)
+				return *snapshotContent.Status.SnapshotHandle, nil
+			}
+
+			s.log.Debug("SnapshotHandle is not ready yet", "contentName", contentName)
+			time.Sleep(s.sleepDuration)
+
+		}
 	}
 }
 

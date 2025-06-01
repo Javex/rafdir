@@ -16,10 +16,10 @@ spec:
           - name: rafdir
             image: "ghcr.io/javex/rafdir:latest"
             imagePullPolicy: Always
+            env:
+              - name: RAFDIR_DB_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ include "rafdir.name" . }}
+                    key: db-url
           restartPolicy: Never
-          env:
-            - name: RAFDIR_DB_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "rafdir.name" . }}
-                  key: db-url

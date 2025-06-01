@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"rafdir"
 	"strings"
 
@@ -16,14 +17,23 @@ func addFlags(cmd *cobra.Command, clientConfig *rafdir.SnapshotClientConfig) {
 	cmd.Flags().StringVarP(&clientConfig.ProfileFilter, "profile", "p", "", "Only back up a single profile. By default all profiles are updated. Value must be the name of a profile in the ConfigMap")
 	cmd.Flags().StringVarP(&clientConfig.RepoFilter, "repository", "r", "", "Only back up profiles for a single repository. By default all repositories get a backup. Value must be the name of a repo in the ConfigMap.")
 	cmd.Flags().StringVar(&clientConfig.ImageTag, "image-tag", "latest", "Tag of the rafdir image to use for the backup run.")
+
 }
 
 func rootRun(clientConfig *rafdir.SnapshotClientConfig) error {
+	// Augment client config with env vars
+	clientConfig.DbUrl = os.Getenv("RAFDIR_DB_URL")
+	if clientConfig.DbUrl == "" {
+		return fmt.Errorf("RAFDIR_DB_URL environment variable must be set")
+	}
+
 	ctx := context.Background()
 	client, err := clientConfig.Build(ctx)
 	if err != nil {
 		return fmt.Errorf("Failed to create client: %s", err)
 	}
+	defer client.Close(ctx)
+
 	errs := client.TakeBackup(ctx)
 	if len(errs) > 0 {
 		var errMsgs []string

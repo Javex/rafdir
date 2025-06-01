@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"rafdir/internal"
 	"rafdir/internal/cli"
+	"rafdir/internal/db"
 	"strings"
 	"syscall"
 	"time"
@@ -21,6 +22,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/tracelog"
 	csiClientset "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned"
 )
 
@@ -31,6 +35,8 @@ type SnapshotClientConfig struct {
 	ProfileFilter string
 	RepoFilter    string
 	ImageTag      string
+
+	DbUrl string
 }
 
 func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, error) {
@@ -38,15 +44,23 @@ func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, erro
 	var csiClient *csiClientset.Clientset
 
 	var logLevel slog.Level
+	var dbLogLevel tracelog.LogLevel
 	switch l := strings.ToLower(s.LogLevel); l {
+	case "trace":
+		logLevel = slog.LevelDebug
+		dbLogLevel = tracelog.LogLevelTrace
 	case "debug":
 		logLevel = slog.LevelDebug
+		dbLogLevel = tracelog.LogLevelDebug
 	case "info":
 		logLevel = slog.LevelInfo
+		dbLogLevel = tracelog.LogLevelInfo
 	case "warn":
 		logLevel = slog.LevelWarn
+		dbLogLevel = tracelog.LogLevelWarn
 	case "error":
 		logLevel = slog.LevelError
+		dbLogLevel = tracelog.LogLevelError
 	default:
 		return nil, fmt.Errorf("Invalid log level %s", s.LogLevel)
 	}
@@ -99,32 +113,84 @@ func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, erro
 		return nil, fmt.Errorf("Failed to load global configmap: %s", err)
 	}
 
-	client, err := NewClient(
-		log,
-		kubeClient,
-		csiClient,
-		config,
-	)
+	if s.DbUrl == "" {
+		return nil, fmt.Errorf("Missing DbUrl in config")
+	}
+
+	dbConfig, err := pgx.ParseConfig(s.DbUrl)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to parse database url: %s", err)
+	}
+
+	dbConfig.Tracer = &tracelog.TraceLog{
+		Logger: &DbLogger{
+			log: log.With("component", "db"),
+		},
+		LogLevel: dbLogLevel,
+	}
+
+	dbConn, err := pgx.ConnectConfig(ctx, dbConfig)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to connect to database: %s", err)
+	}
+
+	client := &SnapshotClient{
+		kubeClient: kubeClient,
+		csiClient:  csiClient,
+		db:         dbConn,
+		queries:    db.New(dbConn),
+		config:     config,
+		log:        log,
+	}
 
 	return client, err
+}
+
+type DbLogger struct {
+	log *slog.Logger
+}
+
+func (l *DbLogger) Log(ctx context.Context, level tracelog.LogLevel, msg string, data map[string]any) {
+	args := make([]any, 0, len(data)*2)
+	for k, v := range data {
+		args = append(args, k, v)
+	}
+	var slogLevel slog.Level
+	switch level {
+	case tracelog.LogLevelTrace:
+		slogLevel = slog.LevelDebug
+	case tracelog.LogLevelDebug:
+		slogLevel = slog.LevelDebug
+	case tracelog.LogLevelInfo:
+		slogLevel = slog.LevelInfo
+	case tracelog.LogLevelWarn:
+		slogLevel = slog.LevelWarn
+	case tracelog.LogLevelError:
+		slogLevel = slog.LevelError
+	case tracelog.LogLevelNone:
+		slogLevel = slog.LevelError // No logging
+	default:
+		slogLevel = slog.LevelError // Default to error for unknown levels
+	}
+	l.log.Log(ctx, slogLevel, msg, args...)
 }
 
 type SnapshotClient struct {
 	kubeClient kubernetes.Interface
 	csiClient  csiClientset.Interface
+	db         *pgx.Conn
+	queries    *db.Queries
 	config     *internal.Config
 	log        *slog.Logger
 }
 
-func NewClient(log *slog.Logger, kubeClient kubernetes.Interface, csiClient csiClientset.Interface, config *internal.Config) (*SnapshotClient, error) {
-
-	client := SnapshotClient{
-		kubeClient: kubeClient,
-		csiClient:  csiClient,
-		config:     config,
-		log:        log,
+func (s *SnapshotClient) Close(ctx context.Context) {
+	err := s.db.Close(ctx)
+	if err != nil {
+		s.log.Error("Failed to close database connection", "err", err)
 	}
-	return &client, nil
+	// It holds a reference to the database connection, so we need to close it
+	s.queries = nil
 }
 
 func (s *SnapshotClient) TakeBackup(ctx context.Context) []error {
@@ -138,11 +204,68 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) []error {
 		return []error{fmt.Errorf("Failed to render base profile: %s", err)}
 	}
 
+	dbProfiles, err := s.queries.ListProfiles(ctx)
+	if err != nil {
+		return []error{fmt.Errorf("Failed to list profiles from database: %s", err)}
+	}
+
+	dbProfileMap := make(map[string]db.Profile)
+	for _, profile := range dbProfiles {
+		dbProfileMap[profile.Profile] = profile
+	}
+
 	errors := make([]error, 0)
 	for _, profile := range profiles {
+		// Check if profile exists in db, if not create a new object
+		dbProfile, profileExistsInDb := dbProfileMap[profile.Name]
+		if profileExistsInDb {
+
+			// If the backup was run recently, skip this profile
+			now := time.Now().UTC()
+			sinceLastCompletion := now.Sub(dbProfile.Lastcompletion.Time)
+			log.Debug("Checking last completion time for profile", "profile", profile.Name, "lastCompletion", dbProfile.Lastcompletion.Time, "sinceLastCompletion", sinceLastCompletion, "now", now)
+			if sinceLastCompletion < s.config.MinBackupInterval {
+				log.Info("Skipping profile backup, already completed within last 24 hours", "profile", profile.Name, "lastCompletion", dbProfile.Lastcompletion.Time, "sinceLastCompletion", sinceLastCompletion, "now", now)
+				continue
+			}
+		}
+
 		err = s.profileBackup(ctx, &profile, baseProfile)
 		if err != nil {
 			errors = append(errors, err)
+		}
+
+		// Only update backup timestamp if the backup was successful
+		if err == nil {
+			// Backup has finished, store the latest completion time in the database
+			backupFinishTime := time.Now().UTC()
+			dbBackupFinishTime := pgtype.Timestamp{
+				Time:  backupFinishTime,
+				Valid: true,
+			}
+
+			if !profileExistsInDb {
+				_, err := s.queries.CreateProfile(ctx, db.CreateProfileParams{
+					Profile:        profile.Name,
+					Lastcompletion: dbBackupFinishTime,
+				})
+				if err != nil {
+					errors = append(errors, fmt.Errorf("Failed to create profile in database: %s", err))
+				} else {
+					log.Info("Created new profile in database", "profile", profile.Name)
+				}
+			} else {
+				// Update the last completion time of the profile
+				err := s.queries.UpdateProfile(ctx, db.UpdateProfileParams{
+					Profile:        dbProfile.Profile,
+					Lastcompletion: dbBackupFinishTime,
+				})
+				if err != nil {
+					errors = append(errors, fmt.Errorf("Failed to update profile in database: %s", err))
+				} else {
+					log.Info("Updated profile in database", "profile", profile.Name, "lastCompletion", dbProfile.Lastcompletion, "backupFinishTime", backupFinishTime)
+				}
+			}
 		}
 	}
 

@@ -17,7 +17,15 @@ import (
 type Config struct {
 	GlobalConfigFile string
 	SnapshotClass    string
-	BackupNamespace  string
+	// MinBackupInterval is the time to wait between backups for a given profile,
+	// skipping them if the last backup was within this interval. It should be
+	// slightly lower than the interval chosen to run backups. If it is the same,
+	// then backups might be skipped. For example, if the backup runs every 24h
+	// and this interval is also set to 24h, then if a backup is slightly faster
+	// than the last one, it'll skip that run. Set it to 12h or 18h to avoid
+	// that.
+	MinBackupInterval time.Duration
+	BackupNamespace   string
 	// DefaultStorageClass is used for the temporary backup PVC which is different from
 	// the default one. It should still be the same underlying provisioner/driver
 	// but, it can have different parameters. For example, it might not have any
@@ -80,8 +88,11 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 	log.Info("Using image", "image", image)
 
 	config := &Config{
-		GlobalConfigFile:       globalConfigFile,
-		SnapshotClass:          "longhorn",
+		GlobalConfigFile: globalConfigFile,
+		SnapshotClass:    "longhorn",
+		// Don't set it to 24h, otherwise if the run is slightly faster, then it'll
+		// skip this backup.
+		MinBackupInterval:      12 * time.Hour,
 		BackupNamespace:        backupNamespace,
 		DefaultStorageClass:    defaultStorageClass,
 		SleepDuration:          1 * time.Second,

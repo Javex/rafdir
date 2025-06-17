@@ -9,9 +9,9 @@ into a per-profile pod that actually runs the backup using resticprofile.
 
 This means there are a few requirements to running this:
 
-* The cluster must have snapshot support installed
-* The PVC driver must support snapshots and be set up correctly
-* An existing snapshot class must be available, it should have a retention
+- The cluster must have snapshot support installed
+- The PVC driver must support snapshots and be set up correctly
+- An existing snapshot class must be available, it should have a retention
   policy of "Delete"
 
 A lot of values are hardcoded at the moment, but I'm open to pull requests to
@@ -24,7 +24,7 @@ Then install the Helm chart:
 
 ```bash
 helm upgrade --install --namespace backup rafdir ./helm/charts/rafdir -f secrets.yaml -f values.yaml
-````
+```
 
 This creates the resources, e.g. service account, role, etc. so that the backup
 can run.
@@ -41,11 +41,10 @@ If you install the Helm chart and then run the application locally, you can
 test pretty easily:
 
 ```
-go run ./cmd/rafdir.go
+go run ./cmd/rafdir/main.go
 ```
 
 Make sure you have a `KUBECONFIG` env var set up.
-
 
 ## FAQ
 

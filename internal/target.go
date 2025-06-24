@@ -12,6 +12,25 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// VolumeType represents the type of volume being backed up
+type VolumeType string
+
+const (
+	VolumeTypePVC VolumeType = "pvc"
+	VolumeTypeNFS VolumeType = "nfs"
+)
+
+// VolumeInfo contains information about a volume that can be backed up
+type VolumeInfo struct {
+	Type        VolumeType
+	VolumeMount *corev1.VolumeMount
+	// For PVC volumes
+	PVC *corev1.PersistentVolumeClaim
+	// For NFS volumes
+	NFS *corev1.NFSVolumeSource
+}
+
+// BackupTarget interface for different types of backup targets
 type BackupTarget interface {
 	PodName() string
 }
@@ -21,9 +40,8 @@ type PodBackupTarget struct {
 	Namespace string
 	Selector  string
 
-	// Support multiple PVCs and volume mounts for multiple folders
-	pvcs         map[string]*corev1.PersistentVolumeClaim
-	volumeMounts map[string]*corev1.VolumeMount
+	// Support multiple volume types (PVCs and NFS)
+	volumeInfos map[string]*VolumeInfo
 
 	profile *Profile
 
@@ -111,75 +129,127 @@ func NewBackupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Inte
 	return target, nil
 }
 
-// findPvcAndVolume iterates through all volumes and determines PVCs as backup
-// targets. It is an error if there is no PVC. Also looks up the volume mounts within the container.
-func (t *PodBackupTarget) findPvcAndVolume(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) error {
-	if t.pvcs == nil || t.volumeMounts == nil {
-		t.pvcs = make(map[string]*corev1.PersistentVolumeClaim)
-		t.volumeMounts = make(map[string]*corev1.VolumeMount)
+// findVolumes iterates through all volumes and determines backup targets.
+// It supports both PVCs and NFS volumes. It is an error if there are no volumes.
+func (t *PodBackupTarget) findVolumes(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) error {
+	if t.volumeInfos == nil {
+		t.volumeInfos = make(map[string]*VolumeInfo)
 
 		for _, volume := range t.Pod.Spec.Volumes {
-			if volume.PersistentVolumeClaim == nil {
-				continue
+			if err := t.processVolume(ctx, log, kubeclient, volume); err != nil {
+				return err
 			}
-			pvcName := volume.PersistentVolumeClaim.ClaimName
-			if _, exists := t.pvcs[pvcName]; exists {
-				return fmt.Errorf("more than one PVC found for %s", pvcName)
-			}
-
-			log.Info("Found PVC", "volumeName", volume.Name, "pvcName", pvcName)
-
-			// Find the mount path within the first container of the pod that matches
-			// the volume name
-			volumeName := volume.Name
-		outer:
-			for _, container := range t.Pod.Spec.Containers {
-				for _, volumeMount := range container.VolumeMounts {
-					if volumeMount.Name == volumeName {
-						t.volumeMounts[pvcName] = &volumeMount
-						break outer
-					}
-				}
-			}
-
-			if t.volumeMounts[pvcName] == nil {
-				return fmt.Errorf("volume mount not found for %s", pvcName)
-			}
-
-			// Look up the PVC
-			pvc, err := kubeclient.CoreV1().
-				PersistentVolumeClaims(t.Pod.Namespace).
-				Get(ctx, pvcName, metav1.GetOptions{})
-			if err != nil {
-				return fmt.Errorf("error looking up PVC %s: %w", pvcName, err)
-			}
-
-			t.pvcs[pvcName] = pvc
 		}
 
-		if len(t.pvcs) == 0 {
-			return fmt.Errorf("no PVC found")
+		if len(t.volumeInfos) == 0 {
+			return fmt.Errorf("no volumes found")
 		}
 	}
 
 	return nil
 }
 
-// GetFolderToPvcMapping returns a map of folder paths to volume mounts and PVC objects
-func (t *PodBackupTarget) GetFolderToPvcMapping(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) (map[string]*corev1.VolumeMount, map[string]*corev1.PersistentVolumeClaim, error) {
-	err := t.findPvcAndVolume(ctx, log, kubeclient)
+// processVolume handles a single volume, determining its type and creating the appropriate VolumeInfo
+func (t *PodBackupTarget) processVolume(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, volume corev1.Volume) error {
+	if volume.PersistentVolumeClaim != nil {
+		return t.processPVCVolume(ctx, log, kubeclient, volume)
+	}
+
+	if volume.NFS != nil {
+		return t.processNFSVolume(ctx, log, volume)
+	}
+
+	// Skip unsupported volume types
+	return nil
+}
+
+// processPVCVolume handles PVC volumes, looking up the PVC and finding its mount path
+func (t *PodBackupTarget) processPVCVolume(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, volume corev1.Volume) error {
+	pvcName := volume.PersistentVolumeClaim.ClaimName
+	if _, exists := t.volumeInfos[pvcName]; exists {
+		return fmt.Errorf("more than one PVC found for %s", pvcName)
+	}
+
+	log.Info("Found PVC", "volumeName", volume.Name, "pvcName", pvcName)
+
+	volumeMount, err := t.findVolumeMount(volume.Name)
 	if err != nil {
-		return nil, nil, err
+		return fmt.Errorf("volume mount not found for %s: %w", pvcName, err)
 	}
 
-	folderToVolumeMount := make(map[string]*corev1.VolumeMount)
-	folderToPvcObject := make(map[string]*corev1.PersistentVolumeClaim)
-	for pvcName, volumeMount := range t.volumeMounts {
-		folderToVolumeMount[volumeMount.MountPath] = volumeMount
-		folderToPvcObject[volumeMount.MountPath] = t.pvcs[pvcName]
+	pvc, err := t.lookupPVC(ctx, kubeclient, pvcName)
+	if err != nil {
+		return err
 	}
 
-	return folderToVolumeMount, folderToPvcObject, nil
+	t.volumeInfos[pvcName] = &VolumeInfo{
+		Type:        VolumeTypePVC,
+		VolumeMount: volumeMount,
+		PVC:         pvc,
+	}
+
+	return nil
+}
+
+// processNFSVolume handles NFS volumes, finding their mount path
+func (t *PodBackupTarget) processNFSVolume(ctx context.Context, log *slog.Logger, volume corev1.Volume) error {
+	volumeName := volume.Name
+	if _, exists := t.volumeInfos[volumeName]; exists {
+		return fmt.Errorf("more than one NFS volume found for %s", volumeName)
+	}
+
+	log.Info("Found NFS", "volumeName", volume.Name, "server", volume.NFS.Server, "path", volume.NFS.Path)
+
+	volumeMount, err := t.findVolumeMount(volumeName)
+	if err != nil {
+		return fmt.Errorf("volume mount not found for NFS volume %s: %w", volumeName, err)
+	}
+
+	t.volumeInfos[volumeName] = &VolumeInfo{
+		Type:        VolumeTypeNFS,
+		VolumeMount: volumeMount,
+		NFS:         volume.NFS,
+	}
+
+	return nil
+}
+
+// findVolumeMount searches for a volume mount that matches the given volume name
+func (t *PodBackupTarget) findVolumeMount(volumeName string) (*corev1.VolumeMount, error) {
+	for _, container := range t.Pod.Spec.Containers {
+		for _, volumeMount := range container.VolumeMounts {
+			if volumeMount.Name == volumeName {
+				return &volumeMount, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no volume mount found for volume %s", volumeName)
+}
+
+// lookupPVC retrieves a PVC from the Kubernetes API
+func (t *PodBackupTarget) lookupPVC(ctx context.Context, kubeclient kubernetes.Interface, pvcName string) (*corev1.PersistentVolumeClaim, error) {
+	pvc, err := kubeclient.CoreV1().
+		PersistentVolumeClaims(t.Pod.Namespace).
+		Get(ctx, pvcName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("error looking up PVC %s: %w", pvcName, err)
+	}
+	return pvc, nil
+}
+
+// GetFolderToVolumeMapping returns a map of folder paths to volume information
+func (t *PodBackupTarget) GetFolderToVolumeMapping(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) (map[string]*VolumeInfo, error) {
+	err := t.findVolumes(ctx, log, kubeclient)
+	if err != nil {
+		return nil, err
+	}
+
+	folderToVolumeInfo := make(map[string]*VolumeInfo)
+	for _, volumeInfo := range t.volumeInfos {
+		folderToVolumeInfo[volumeInfo.VolumeMount.MountPath] = volumeInfo
+	}
+
+	return folderToVolumeInfo, nil
 }
 
 // selectorFromDeployment returns a label selector for a deployment

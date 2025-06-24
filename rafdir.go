@@ -381,48 +381,58 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 			return fmt.Errorf("Folders without Node requires a PodBackupTarget")
 		}
 
-		// Get the mapping of folders to volume mounts and PVC objects
-		folderToVolumeMount, folderToPvcObject, err := podTarget.GetFolderToPvcMapping(ctx, log, s.kubeClient)
+		// Get the mapping of folders to volume information
+		folderToVolumeInfo, err := podTarget.GetFolderToVolumeMapping(ctx, log, s.kubeClient)
 		if err != nil {
-			return fmt.Errorf("Failed to GetFolderToPvcMapping: %s", err)
+			return fmt.Errorf("Failed to GetFolderToVolumeMapping: %s", err)
 		}
 
-		// Validate that all folders have corresponding PVCs
+		// Validate that all folders have corresponding volumes
 		for _, folder := range profile.Folders {
-			if _, exists := folderToPvcObject[folder]; !exists {
-				return fmt.Errorf("No PVC found for folder %s", folder)
+			if _, exists := folderToVolumeInfo[folder]; !exists {
+				return fmt.Errorf("No volume found for folder %s", folder)
 			}
 		}
 
 		// Create snapshots for each folder
 		for _, folder := range profile.Folders {
-			volumeMount := folderToVolumeMount[folder]
-			sourcePvc := folderToPvcObject[folder]
+			volumeInfo := folderToVolumeInfo[folder]
 
 			// Verify the mount path matches the folder
-			if volumeMount.MountPath != folder {
-				return fmt.Errorf("VolumeMount mount path %s does not match profile folder %s", volumeMount.MountPath, folder)
+			if volumeInfo.VolumeMount.MountPath != folder {
+				return fmt.Errorf("VolumeMount mount path %s does not match profile folder %s", volumeInfo.VolumeMount.MountPath, folder)
 			}
 
-			snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
-				DestNamespace:          s.config.BackupNamespace,
-				RunSuffix:              runSuffix,
-				SnapshotClass:          profile.SnapshotClass,
-				StorageClass:           profile.StorageClass,
-				WaitTimeout:            s.config.WaitTimeout,
-				SnapshotContentTimeout: s.config.SnapshotContentTimeout,
-				SleepDuration:          s.config.SleepDuration,
-			})
-			// Schedule cleanup before kicking off the resource creation. If no
-			// resources end up being created this does nothing.
-			cleanup = append(cleanup, func() { snapshotter.Cleanup(ctx) })
+			switch volumeInfo.Type {
+			case internal.VolumeTypePVC:
+				// Handle PVC volumes with snapshots
+				snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
+					DestNamespace:          s.config.BackupNamespace,
+					RunSuffix:              runSuffix,
+					SnapshotClass:          profile.SnapshotClass,
+					StorageClass:           profile.StorageClass,
+					WaitTimeout:            s.config.WaitTimeout,
+					SnapshotContentTimeout: s.config.SnapshotContentTimeout,
+					SleepDuration:          s.config.SleepDuration,
+				})
+				// Schedule cleanup before kicking off the resource creation. If no
+				// resources end up being created this does nothing.
+				cleanup = append(cleanup, func() { snapshotter.Cleanup(ctx) })
 
-			backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, sourcePvc, scaleUp)
-			if err != nil {
-				return fmt.Errorf("Failed to BackupPvcFromSourcePvc for %s: %s", folder, err)
+				backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, volumeInfo.PVC, scaleUp)
+				if err != nil {
+					return fmt.Errorf("Failed to BackupPvcFromSourcePvc for %s: %s", folder, err)
+				}
+
+				s.AddPvcToPod(backupPod, volumeInfo.VolumeMount, backupPvc.Name)
+
+			case internal.VolumeTypeNFS:
+				// Handle NFS volumes directly (no snapshot needed)
+				s.AddNfsToPod(backupPod, volumeInfo.VolumeMount, volumeInfo.NFS)
+
+			default:
+				return fmt.Errorf("Unsupported volume type %s for folder %s", volumeInfo.Type, folder)
 			}
-
-			s.AddPvcToPod(backupPod, volumeMount, backupPvc.Name)
 		}
 	}
 
@@ -699,6 +709,17 @@ func (s *SnapshotClient) AddPvcToPod(pod *corev1.Pod, volumeMount *corev1.Volume
 			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 				ClaimName: sourcePvcName,
 			},
+		},
+	})
+}
+
+func (s *SnapshotClient) AddNfsToPod(pod *corev1.Pod, volumeMount *corev1.VolumeMount, nfsSource *corev1.NFSVolumeSource) {
+	pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, *volumeMount)
+
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		Name: volumeMount.Name,
+		VolumeSource: corev1.VolumeSource{
+			NFS: nfsSource,
 		},
 	})
 }

@@ -289,19 +289,18 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 	}
 }
 
-func TestGetFolderToPvcMapping(t *testing.T) {
+func TestGetFolderToVolumeMapping(t *testing.T) {
 	tcs := []struct {
-		name            string
-		deploymentName  string
-		deployment      *appsv1.Deployment
-		pods            []*corev1.Pod
-		pvcs            []*corev1.PersistentVolumeClaim
-		expVolumeMounts map[string]*corev1.VolumeMount
-		expPvcObjects   map[string]*corev1.PersistentVolumeClaim
-		expErrContains  string
+		name           string
+		deploymentName string
+		deployment     *appsv1.Deployment
+		pods           []*corev1.Pod
+		pvcs           []*corev1.PersistentVolumeClaim
+		expVolumeInfos map[string]*internal.VolumeInfo
+		expErrContains string
 	}{
 		{
-			"singleFolder",
+			"singlePvcFolder",
 			"testDeployment",
 			&appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{
@@ -359,24 +358,25 @@ func TestGetFolderToPvcMapping(t *testing.T) {
 					},
 				},
 			},
-			map[string]*corev1.VolumeMount{
+			map[string]*internal.VolumeInfo{
 				"/test/mount/path": {
-					Name:      "testPvc",
-					MountPath: "/test/mount/path",
-				},
-			},
-			map[string]*corev1.PersistentVolumeClaim{
-				"/test/mount/path": {
-					ObjectMeta: metav1.ObjectMeta{
+					Type: internal.VolumeTypePVC,
+					VolumeMount: &corev1.VolumeMount{
 						Name:      "testPvc",
-						Namespace: "test",
+						MountPath: "/test/mount/path",
+					},
+					PVC: &corev1.PersistentVolumeClaim{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "testPvc",
+							Namespace: "test",
+						},
 					},
 				},
 			},
 			"",
 		},
 		{
-			"multipleFolders",
+			"singleNfsFolder",
 			"testDeployment",
 			&appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{
@@ -407,30 +407,19 @@ func TestGetFolderToPvcMapping(t *testing.T) {
 								Name: "testContainer",
 								VolumeMounts: []corev1.VolumeMount{
 									{
-										Name:      "testPvc1",
-										MountPath: "/test/mount/path1",
-									},
-									{
-										Name:      "testPvc2",
-										MountPath: "/test/mount/path2",
+										Name:      "testNfs",
+										MountPath: "/test/nfs/path",
 									},
 								},
 							},
 						},
 						Volumes: []corev1.Volume{
 							{
-								Name: "testPvc1",
+								Name: "testNfs",
 								VolumeSource: corev1.VolumeSource{
-									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-										ClaimName: "testPvc1",
-									},
-								},
-							},
-							{
-								Name: "testPvc2",
-								VolumeSource: corev1.VolumeSource{
-									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-										ClaimName: "testPvc2",
+									NFS: &corev1.NFSVolumeSource{
+										Server: "nfs.example.com",
+										Path:   "/shared/data",
 									},
 								},
 							},
@@ -438,48 +427,24 @@ func TestGetFolderToPvcMapping(t *testing.T) {
 					},
 				},
 			},
-			[]*corev1.PersistentVolumeClaim{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "testPvc1",
-						Namespace: "test",
+			nil,
+			map[string]*internal.VolumeInfo{
+				"/test/nfs/path": {
+					Type: internal.VolumeTypeNFS,
+					VolumeMount: &corev1.VolumeMount{
+						Name:      "testNfs",
+						MountPath: "/test/nfs/path",
 					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "testPvc2",
-						Namespace: "test",
-					},
-				},
-			},
-			map[string]*corev1.VolumeMount{
-				"/test/mount/path1": {
-					Name:      "testPvc1",
-					MountPath: "/test/mount/path1",
-				},
-				"/test/mount/path2": {
-					Name:      "testPvc2",
-					MountPath: "/test/mount/path2",
-				},
-			},
-			map[string]*corev1.PersistentVolumeClaim{
-				"/test/mount/path1": {
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "testPvc1",
-						Namespace: "test",
-					},
-				},
-				"/test/mount/path2": {
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "testPvc2",
-						Namespace: "test",
+					NFS: &corev1.NFSVolumeSource{
+						Server: "nfs.example.com",
+						Path:   "/shared/data",
 					},
 				},
 			},
 			"",
 		},
 		{
-			"noPvc",
+			"mixedPvcAndNfs",
 			"testDeployment",
 			&appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{
@@ -505,24 +470,121 @@ func TestGetFolderToPvcMapping(t *testing.T) {
 					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
+						Containers: []corev1.Container{
+							{
+								Name: "testContainer",
+								VolumeMounts: []corev1.VolumeMount{
+									{
+										Name:      "testPvc",
+										MountPath: "/test/pvc/path",
+									},
+									{
+										Name:      "testNfs",
+										MountPath: "/test/nfs/path",
+									},
+								},
+							},
+						},
 						Volumes: []corev1.Volume{
 							{
-								Name: "testEmptyDir",
+								Name: "testPvc",
 								VolumeSource: corev1.VolumeSource{
-									EmptyDir: &corev1.EmptyDirVolumeSource{},
+									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testPvc",
+									},
+								},
+							},
+							{
+								Name: "testNfs",
+								VolumeSource: corev1.VolumeSource{
+									NFS: &corev1.NFSVolumeSource{
+										Server: "nfs.example.com",
+										Path:   "/shared/data",
+									},
 								},
 							},
 						},
 					},
 				},
 			},
-			nil,
-			nil,
-			nil,
-			"no PVC found",
+			[]*corev1.PersistentVolumeClaim{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPvc",
+						Namespace: "test",
+					},
+				},
+			},
+			map[string]*internal.VolumeInfo{
+				"/test/pvc/path": {
+					Type: internal.VolumeTypePVC,
+					VolumeMount: &corev1.VolumeMount{
+						Name:      "testPvc",
+						MountPath: "/test/pvc/path",
+					},
+					PVC: &corev1.PersistentVolumeClaim{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "testPvc",
+							Namespace: "test",
+						},
+					},
+				},
+				"/test/nfs/path": {
+					Type: internal.VolumeTypeNFS,
+					VolumeMount: &corev1.VolumeMount{
+						Name:      "testNfs",
+						MountPath: "/test/nfs/path",
+					},
+					NFS: &corev1.NFSVolumeSource{
+						Server: "nfs.example.com",
+						Path:   "/shared/data",
+					},
+				},
+			},
+			"",
 		},
 		{
-			"PvcMissing",
+			"noVolumes",
+			"testDeployment",
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testDeployment",
+					Namespace: "test",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+				},
+			},
+			[]*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPod",
+						Namespace: "test",
+						Labels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "testNode",
+						Containers: []corev1.Container{
+							{
+								Name: "testContainer",
+							},
+						},
+						Volumes: []corev1.Volume{},
+					},
+				},
+			},
+			nil,
+			nil,
+			"no volumes found",
+		},
+		{
+			"pvcLookupError",
 			"testDeployment",
 			&appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{
@@ -572,7 +634,6 @@ func TestGetFolderToPvcMapping(t *testing.T) {
 					},
 				},
 			},
-			nil,
 			nil,
 			nil,
 			"error looking up PVC testPvc",
@@ -629,7 +690,7 @@ func TestGetFolderToPvcMapping(t *testing.T) {
 				t.Fatalf("failed to create target: %v", err)
 			}
 
-			volumeMounts, pvcObjects, err := target.GetFolderToPvcMapping(ctx, log, kubeclient)
+			volumeInfos, err := target.GetFolderToVolumeMapping(ctx, log, kubeclient)
 
 			if tc.expErrContains != "" {
 				if err == nil {
@@ -643,12 +704,8 @@ func TestGetFolderToPvcMapping(t *testing.T) {
 					t.Fatalf("expected no error, got %v", err)
 				}
 
-				if !cmp.Equal(volumeMounts, tc.expVolumeMounts) {
-					t.Errorf("unexpected difference in volume mounts: %v", cmp.Diff(volumeMounts, tc.expVolumeMounts))
-				}
-
-				if !cmp.Equal(pvcObjects, tc.expPvcObjects) {
-					t.Errorf("unexpected difference in pvc objects: %v", cmp.Diff(pvcObjects, tc.expPvcObjects))
+				if !cmp.Equal(volumeInfos, tc.expVolumeInfos) {
+					t.Errorf("unexpected difference in volume infos: %v", cmp.Diff(volumeInfos, tc.expVolumeInfos))
 				}
 			}
 		})

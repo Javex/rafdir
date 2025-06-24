@@ -297,6 +297,36 @@ func TestProfilesFromYaml(t *testing.T) {
 			"testNamespace",
 			"", // expFilepath
 		},
+		{
+			"multipleFolders",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          folders:
+            - /test/folder1
+            - /test/folder2
+            - /test/folder3
+      `,
+			"",
+
+			map[string]internal.Profile{
+				"test": {
+					Name:          "test",
+					Namespace:     "testNamespace",
+					Deployment:    "testDeployment",
+					Stop:          false,
+					Host:          "test.example.com",
+					Folders:       []string{"/test/folder1", "/test/folder2", "/test/folder3"},
+					SnapshotClass: "testSnapshotClass",
+					StorageClass:  "testStorageClass",
+				},
+			},
+			"testNamespace",
+			"", // expFilepath
+		},
 	}
 
 	for _, tc := range tcs {

@@ -289,24 +289,19 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 	}
 }
 
-func TestFindPvcAndVolumeMount(t *testing.T) {
-	type targetExpectation struct {
-		PodName   string
-		Namespace string
-		Selector  string
-	}
+func TestGetFolderToPvcMapping(t *testing.T) {
 	tcs := []struct {
-		name           string
-		deploymentName string
-		deployment     *appsv1.Deployment
-		pods           []*corev1.Pod
-		pvcs           []*corev1.PersistentVolumeClaim
-		expPvcName     string
-		expVolumeMount *corev1.VolumeMount
-		expErrContains string
+		name            string
+		deploymentName  string
+		deployment      *appsv1.Deployment
+		pods            []*corev1.Pod
+		pvcs            []*corev1.PersistentVolumeClaim
+		expVolumeMounts map[string]*corev1.VolumeMount
+		expPvcObjects   map[string]*corev1.PersistentVolumeClaim
+		expErrContains  string
 	}{
 		{
-			"success",
+			"singleFolder",
 			"testDeployment",
 			&appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{
@@ -364,15 +359,24 @@ func TestFindPvcAndVolumeMount(t *testing.T) {
 					},
 				},
 			},
-			"testPvc",
-			&corev1.VolumeMount{
-				Name:      "testPvc",
-				MountPath: "/test/mount/path",
+			map[string]*corev1.VolumeMount{
+				"/test/mount/path": {
+					Name:      "testPvc",
+					MountPath: "/test/mount/path",
+				},
+			},
+			map[string]*corev1.PersistentVolumeClaim{
+				"/test/mount/path": {
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPvc",
+						Namespace: "test",
+					},
+				},
 			},
 			"",
 		},
 		{
-			"multiplePvcs",
+			"multipleFolders",
 			"testDeployment",
 			&appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{
@@ -398,12 +402,27 @@ func TestFindPvcAndVolumeMount(t *testing.T) {
 					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
+						Containers: []corev1.Container{
+							{
+								Name: "testContainer",
+								VolumeMounts: []corev1.VolumeMount{
+									{
+										Name:      "testPvc1",
+										MountPath: "/test/mount/path1",
+									},
+									{
+										Name:      "testPvc2",
+										MountPath: "/test/mount/path2",
+									},
+								},
+							},
+						},
 						Volumes: []corev1.Volume{
 							{
-								Name: "testPvc",
+								Name: "testPvc1",
 								VolumeSource: corev1.VolumeSource{
 									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-										ClaimName: "testPvc",
+										ClaimName: "testPvc1",
 									},
 								},
 							},
@@ -419,10 +438,45 @@ func TestFindPvcAndVolumeMount(t *testing.T) {
 					},
 				},
 			},
-			nil,
+			[]*corev1.PersistentVolumeClaim{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPvc1",
+						Namespace: "test",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPvc2",
+						Namespace: "test",
+					},
+				},
+			},
+			map[string]*corev1.VolumeMount{
+				"/test/mount/path1": {
+					Name:      "testPvc1",
+					MountPath: "/test/mount/path1",
+				},
+				"/test/mount/path2": {
+					Name:      "testPvc2",
+					MountPath: "/test/mount/path2",
+				},
+			},
+			map[string]*corev1.PersistentVolumeClaim{
+				"/test/mount/path1": {
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPvc1",
+						Namespace: "test",
+					},
+				},
+				"/test/mount/path2": {
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPvc2",
+						Namespace: "test",
+					},
+				},
+			},
 			"",
-			nil,
-			"more than one PVC found",
 		},
 		{
 			"noPvc",
@@ -463,7 +517,7 @@ func TestFindPvcAndVolumeMount(t *testing.T) {
 				},
 			},
 			nil,
-			"",
+			nil,
 			nil,
 			"no PVC found",
 		},
@@ -519,9 +573,9 @@ func TestFindPvcAndVolumeMount(t *testing.T) {
 				},
 			},
 			nil,
-			"",
 			nil,
-			"error looking up PVC",
+			nil,
+			"error looking up PVC testPvc",
 		},
 	}
 
@@ -575,7 +629,7 @@ func TestFindPvcAndVolumeMount(t *testing.T) {
 				t.Fatalf("failed to create target: %v", err)
 			}
 
-			pvc, err := target.FindPvc(ctx, log, kubeclient)
+			volumeMounts, pvcObjects, err := target.GetFolderToPvcMapping(ctx, log, kubeclient)
 
 			if tc.expErrContains != "" {
 				if err == nil {
@@ -589,34 +643,12 @@ func TestFindPvcAndVolumeMount(t *testing.T) {
 					t.Fatalf("expected no error, got %v", err)
 				}
 
-				if pvc == nil {
-					t.Fatalf("expected pvc, got nil")
+				if !cmp.Equal(volumeMounts, tc.expVolumeMounts) {
+					t.Errorf("unexpected difference in volume mounts: %v", cmp.Diff(volumeMounts, tc.expVolumeMounts))
 				}
 
-				if pvc.Name != tc.expPvcName {
-					t.Errorf("unexpected pvc name: got %q, expected %q", pvc.Name, tc.expPvcName)
-				}
-			}
-
-			volumeMount, err := target.FindVolumeMount(ctx, log, kubeclient)
-			if tc.expErrContains != "" {
-				if err == nil {
-					t.Fatalf("expected error, got nil")
-				}
-				if !strings.Contains(err.Error(), tc.expErrContains) {
-					t.Errorf("expected error to contain %q, got %v", tc.expErrContains, err)
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("expected no error, got %v", err)
-				}
-
-				if volumeMount == nil {
-					t.Fatalf("expected volume mount, got nil")
-				}
-
-				if !cmp.Equal(volumeMount, tc.expVolumeMount) {
-					t.Errorf("unexpected difference in volume mount: %v", cmp.Diff(volumeMount, tc.expVolumeMount))
+				if !cmp.Equal(pvcObjects, tc.expPvcObjects) {
+					t.Errorf("unexpected difference in pvc objects: %v", cmp.Diff(pvcObjects, tc.expPvcObjects))
 				}
 			}
 		})

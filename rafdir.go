@@ -381,41 +381,49 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 			return fmt.Errorf("Folders without Node requires a PodBackupTarget")
 		}
 
-		sourcePvc, err := podTarget.FindPvc(ctx, log, s.kubeClient)
+		// Get the mapping of folders to volume mounts and PVC objects
+		folderToVolumeMount, folderToPvcObject, err := podTarget.GetFolderToPvcMapping(ctx, log, s.kubeClient)
 		if err != nil {
-			return fmt.Errorf("Failed to FindPvc: %s", err)
+			return fmt.Errorf("Failed to GetFolderToPvcMapping: %s", err)
 		}
 
-		volumeMount, err := podTarget.FindVolumeMount(ctx, log, s.kubeClient)
-		if err != nil {
-			return fmt.Errorf("Failed to FindVolumeMount: %s", err)
+		// Validate that all folders have corresponding PVCs
+		for _, folder := range profile.Folders {
+			if _, exists := folderToPvcObject[folder]; !exists {
+				return fmt.Errorf("No PVC found for folder %s", folder)
+			}
 		}
 
-		// check that mount path in volumeMount is what the profile expects to be
-		// backing up
-		if volumeMount.MountPath != profile.Folders[0] {
-			return fmt.Errorf("VolumeMount mount path %s does not match profile folder %s", volumeMount.MountPath, profile.Folders[0])
+		// Create snapshots for each folder
+		for _, folder := range profile.Folders {
+			volumeMount := folderToVolumeMount[folder]
+			sourcePvc := folderToPvcObject[folder]
+
+			// Verify the mount path matches the folder
+			if volumeMount.MountPath != folder {
+				return fmt.Errorf("VolumeMount mount path %s does not match profile folder %s", volumeMount.MountPath, folder)
+			}
+
+			snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
+				DestNamespace:          s.config.BackupNamespace,
+				RunSuffix:              runSuffix,
+				SnapshotClass:          profile.SnapshotClass,
+				StorageClass:           profile.StorageClass,
+				WaitTimeout:            s.config.WaitTimeout,
+				SnapshotContentTimeout: s.config.SnapshotContentTimeout,
+				SleepDuration:          s.config.SleepDuration,
+			})
+			// Schedule cleanup before kicking off the resource creation. If no
+			// resources end up being created this does nothing.
+			cleanup = append(cleanup, func() { snapshotter.Cleanup(ctx) })
+
+			backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, sourcePvc, scaleUp)
+			if err != nil {
+				return fmt.Errorf("Failed to BackupPvcFromSourcePvc for %s: %s", folder, err)
+			}
+
+			s.AddPvcToPod(backupPod, volumeMount, backupPvc.Name)
 		}
-
-		snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
-			DestNamespace:          s.config.BackupNamespace,
-			RunSuffix:              runSuffix,
-			SnapshotClass:          profile.SnapshotClass,
-			StorageClass:           profile.StorageClass,
-			WaitTimeout:            s.config.WaitTimeout,
-			SnapshotContentTimeout: s.config.SnapshotContentTimeout,
-			SleepDuration:          s.config.SleepDuration,
-		})
-		// Schedule cleanup before kicking off the resource creation. If no
-		// resources end up being created this does nothing.
-		cleanup = append(cleanup, func() { snapshotter.Cleanup(ctx) })
-
-		backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, sourcePvc, scaleUp)
-		if err != nil {
-			return fmt.Errorf("Failed to BackupPvcFromSourcePvc: %s", err)
-		}
-
-		s.AddPvcToPod(backupPod, volumeMount, backupPvc.Name)
 	}
 
 	// Backing up a host volume on a node

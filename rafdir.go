@@ -603,7 +603,7 @@ func (s *SnapshotClient) NewBackupPod(podName, runSuffix string) *corev1.Pod {
 					// or not.
 					// Args: []string{"--pause"},
 					VolumeMounts: []corev1.VolumeMount{
-						{Name: "cache", MountPath: "/var/cache"},
+						{Name: "cache", MountPath: "/var/cache/restic"},
 						{Name: "nfs-restic-repo", MountPath: "/mnt/restic-repo"},
 					},
 
@@ -654,7 +654,9 @@ func (s *SnapshotClient) NewBackupPod(podName, runSuffix string) *corev1.Pod {
 				{
 					Name: "cache",
 					VolumeSource: corev1.VolumeSource{
-						EmptyDir: &corev1.EmptyDirVolumeSource{},
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: "/var/cache/restic",
+						},
 					},
 				},
 				{

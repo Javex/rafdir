@@ -29,12 +29,13 @@ import (
 )
 
 type SnapshotClientConfig struct {
-	Namespace     string
-	ConfigMapName string
-	LogLevel      string
-	ProfileFilter string
-	RepoFilter    string
-	ImageTag      string
+	Namespace         string
+	ConfigMapName     string
+	LogLevel          string
+	ProfileFilter     string
+	RepoFilter        string
+	ImageTag          string
+	SkipIntervalCheck bool
 
 	DbUrl string
 }
@@ -135,12 +136,13 @@ func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, erro
 	}
 
 	client := &SnapshotClient{
-		kubeClient: kubeClient,
-		csiClient:  csiClient,
-		db:         dbConn,
-		queries:    db.New(dbConn),
-		config:     config,
-		log:        log,
+		kubeClient:        kubeClient,
+		csiClient:         csiClient,
+		db:                dbConn,
+		queries:           db.New(dbConn),
+		config:            config,
+		log:               log,
+		skipIntervalCheck: s.SkipIntervalCheck,
 	}
 
 	return client, err
@@ -176,12 +178,13 @@ func (l *DbLogger) Log(ctx context.Context, level tracelog.LogLevel, msg string,
 }
 
 type SnapshotClient struct {
-	kubeClient kubernetes.Interface
-	csiClient  csiClientset.Interface
-	db         *pgx.Conn
-	queries    *db.Queries
-	config     *internal.Config
-	log        *slog.Logger
+	kubeClient        kubernetes.Interface
+	csiClient         csiClientset.Interface
+	db                *pgx.Conn
+	queries           *db.Queries
+	config            *internal.Config
+	log               *slog.Logger
+	skipIntervalCheck bool
 }
 
 func (s *SnapshotClient) Close(ctx context.Context) {
@@ -220,13 +223,17 @@ func (s *SnapshotClient) TakeBackup(ctx context.Context) []error {
 		dbProfile, profileExistsInDb := dbProfileMap[profile.Name]
 		if profileExistsInDb {
 
-			// If the backup was run recently, skip this profile
+			// If the backup was run recently, skip this profile (unless check is disabled by flag)
 			now := time.Now().UTC()
 			sinceLastCompletion := now.Sub(dbProfile.Lastcompletion.Time)
 			log.Debug("Checking last completion time for profile", "profile", profile.Name, "lastCompletion", dbProfile.Lastcompletion.Time, "sinceLastCompletion", sinceLastCompletion, "now", now)
 			if sinceLastCompletion < s.config.MinBackupInterval {
-				log.Info("Skipping profile backup, already completed within last 24 hours", "profile", profile.Name, "lastCompletion", dbProfile.Lastcompletion.Time, "sinceLastCompletion", sinceLastCompletion, "now", now)
-				continue
+				if s.skipIntervalCheck {
+					log.Info("Skipping interval check and running backup anyway", "profile", profile.Name, "lastCompletion", dbProfile.Lastcompletion.Time, "sinceLastCompletion", sinceLastCompletion, "now", now)
+				} else {
+					log.Info("Skipping profile backup, already completed within last 24 hours", "profile", profile.Name, "lastCompletion", dbProfile.Lastcompletion.Time, "sinceLastCompletion", sinceLastCompletion, "now", now)
+					continue
+				}
 			}
 		}
 

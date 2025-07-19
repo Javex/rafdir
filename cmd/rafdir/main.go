@@ -17,6 +17,7 @@ func addFlags(cmd *cobra.Command, clientConfig *rafdir.SnapshotClientConfig) {
 	cmd.Flags().StringVarP(&clientConfig.ProfileFilter, "profile", "p", "", "Only back up a single profile. By default all profiles are updated. Value must be the name of a profile in the ConfigMap")
 	cmd.Flags().StringVarP(&clientConfig.RepoFilter, "repository", "r", "", "Only back up profiles for a single repository. By default all repositories get a backup. Value must be the name of a repo in the ConfigMap.")
 	cmd.Flags().StringVar(&clientConfig.ImageTag, "image-tag", "latest", "Tag of the rafdir image to use for the backup run.")
+	cmd.Flags().BoolVar(&clientConfig.SkipIntervalCheck, "skip-interval-check", false, "Skip the backup interval check and run backups even if they were completed recently")
 
 }
 

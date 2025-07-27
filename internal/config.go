@@ -99,7 +99,7 @@ func NewConfigFromConfigMap(log *slog.Logger, backupNamespace string, configMap 
 		WaitTimeout:            10 * time.Second,
 		SnapshotContentTimeout: 5 * time.Minute,
 		PodCreationTimeout:     10 * time.Minute,
-		PodWaitTimeout:         20 * time.Minute,
+		PodWaitTimeout:         30 * time.Minute,
 		Image:                  image,
 
 		Repositories: repositories,

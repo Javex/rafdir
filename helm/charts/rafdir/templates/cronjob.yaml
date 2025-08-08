@@ -8,8 +8,14 @@ spec:
   # Cron schedule that runs once a day
   schedule: "0 0 * * *"
   jobTemplate:
+    metadata:
+      labels:
+        {{- include "rafdir.labels" . | nindent 8 }}
     spec:
       template:
+        metadata:
+          labels:
+            {{- include "rafdir.labels" . | nindent 12 }}
         spec:
           serviceAccountName: {{ include "rafdir.name" . }}
           containers:

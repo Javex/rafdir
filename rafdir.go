@@ -388,6 +388,24 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 			return fmt.Errorf("Folders without Node requires a PodBackupTarget")
 		}
 
+		// In the current implementation the scale up happens when the first
+		// folder's snapshot has been created. That would mean if there's multiple
+		// folders (thus PVCs) to take snapshots of, then it would scale up after
+		// the first folder. The next snapshot would be taken while the service is
+		// running.
+		// The current implementation tries to speed things up by doing the scale
+		// up as early as possible: When the snapshot has succeeded, it does not
+		// need to wait for the new PVC to exist, as that's independent. However,
+		// the current loop does snapshots one-by-one so there's a conflict: Either
+		// take all snapshots and leave the service down for longer, then scale up
+		// at the end. Or throw this error and get the service back faster.
+		// A better implementation in the future might take snapshots in parallel
+		// and scale everything back up once they're all taken.
+		if len(profile.Folders) > 1 && scaleUp != nil {
+			log.Error("Stop is not supported for multiple folders")
+			return fmt.Errorf("stop and multiple folders are not supported")
+		}
+
 		// Get the mapping of folders to volume information
 		folderToVolumeInfo, err := podTarget.GetFolderToVolumeMapping(ctx, log, s.kubeClient)
 		if err != nil {

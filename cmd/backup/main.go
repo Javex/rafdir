@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"rafdir"
 	"strings"
 
 	"rafdir/internal/backup"
 	"rafdir/internal/cli"
+	"rafdir/internal/client"
 
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
@@ -58,25 +58,20 @@ func addFlags(cmd *cobra.Command, backup *backup.Backup) error {
 	var cfg *rest.Config
 	var err error
 
-	if cfg, err = rest.InClusterConfig(); err == nil {
-		kubeClient, err = rafdir.InitK8sClient(cfg)
-		if err != nil {
-			return fmt.Errorf("Failed to create k8s client: %s", err)
-		}
-	} else {
+	if cfg, err = rest.InClusterConfig(); err != nil {
 		kubeconfig := os.Getenv("KUBECONFIG")
 		if kubeconfig == "" {
 			return fmt.Errorf("KUBECONFIG environment variable not set")
 		}
-		cfg, err = rafdir.GetK8sConfig(kubeconfig)
+		cfg, err = client.GetK8sConfig(kubeconfig)
 		if err != nil {
 			return fmt.Errorf("Failed to get k8s config: %s", err)
 		}
+	}
 
-		kubeClient, err = rafdir.InitK8sClient(cfg)
-		if err != nil {
-			return fmt.Errorf("Failed to create k8s client: %s", err)
-		}
+	kubeClient, err = client.InitK8sClient(cfg)
+	if err != nil {
+		return fmt.Errorf("Failed to create k8s client: %s", err)
 	}
 
 	backup.KubernetesClient = kubeClient

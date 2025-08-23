@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 )
 
 func newTestLogger(t *testing.T) *slog.Logger {
@@ -221,6 +222,7 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			kubeclient := fake.NewSimpleClientset()
+			config := &rest.Config{}
 			namespace := "test"
 			if tc.deployment != nil {
 				_, err := kubeclient.
@@ -262,7 +264,7 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 				Namespace:  namespace,
 			}
 			runSuffix := "test"
-			target, err := internal.NewBackupTargetFromDeploymentName(ctx, log, kubeclient, profile, runSuffix)
+			target, err := internal.NewBackupTargetFromDeploymentName(ctx, log, kubeclient, config, profile, runSuffix)
 			if tc.expErrContains != "" {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -644,6 +646,7 @@ func TestGetFolderToVolumeMapping(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			kubeclient := fake.NewSimpleClientset()
+			config := &rest.Config{}
 			namespace := "test"
 			if tc.deployment != nil {
 				_, err := kubeclient.
@@ -685,7 +688,7 @@ func TestGetFolderToVolumeMapping(t *testing.T) {
 				Namespace:  namespace,
 			}
 			runSuffix := "test"
-			target, err := internal.NewBackupTargetFromDeploymentName(ctx, log, kubeclient, profile, runSuffix)
+			target, err := internal.NewBackupTargetFromDeploymentName(ctx, log, kubeclient, config, profile, runSuffix)
 			if err != nil {
 				t.Fatalf("failed to create target: %v", err)
 			}

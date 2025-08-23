@@ -1,15 +1,19 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"strings"
 
+	rafdirExec "rafdir/internal/exec"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 // VolumeType represents the type of volume being backed up
@@ -45,13 +49,14 @@ type PodBackupTarget struct {
 
 	profile *Profile
 
-	podName string
+	podName    string
+	kubeConfig *rest.Config
 }
 
 // NewBackupTargetFromDeploymentName creates a PodBackupTarget from a namespace
 // and a deployment name. It finds the deployment, then the pod, then the PVC
 // and the node name the pod is running on.
-func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, profile *Profile, runSuffix string) (*PodBackupTarget, error) {
+func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, kubeConfig *rest.Config, profile *Profile, runSuffix string) (*PodBackupTarget, error) {
 	deploymentName := profile.Deployment
 	namespace := profile.Namespace
 
@@ -73,10 +78,10 @@ func NewBackupTargetFromDeploymentName(ctx context.Context, log *slog.Logger, ku
 		return nil, fmt.Errorf("selector not found for deployment %s", deploymentName)
 	}
 
-	return NewBackupTargetFromSelector(ctx, kubeclient, namespace, selector, profile, runSuffix)
+	return NewBackupTargetFromSelector(ctx, kubeclient, kubeConfig, namespace, selector, profile, runSuffix)
 }
 
-func NewBackupTargetFromStatefulSetName(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, profile *Profile, runSuffix string) (*PodBackupTarget, error) {
+func NewBackupTargetFromStatefulSetName(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, kubeConfig *rest.Config, profile *Profile, runSuffix string) (*PodBackupTarget, error) {
 	statefulSetName := profile.StatefulSet
 	namespace := profile.Namespace
 
@@ -98,10 +103,10 @@ func NewBackupTargetFromStatefulSetName(ctx context.Context, log *slog.Logger, k
 		return nil, fmt.Errorf("selector not found for statefulSet %s", statefulSetName)
 	}
 
-	return NewBackupTargetFromSelector(ctx, kubeclient, namespace, selector, profile, runSuffix)
+	return NewBackupTargetFromSelector(ctx, kubeclient, kubeConfig, namespace, selector, profile, runSuffix)
 }
 
-func NewBackupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Interface, namespace, selector string, profile *Profile, runSuffix string) (*PodBackupTarget, error) {
+func NewBackupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Interface, kubeConfig *rest.Config, namespace, selector string, profile *Profile, runSuffix string) (*PodBackupTarget, error) {
 	podList, err := kubeclient.CoreV1().
 		Pods(namespace).
 		List(ctx, metav1.ListOptions{
@@ -124,7 +129,8 @@ func NewBackupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Inte
 
 		profile: profile,
 
-		podName: fmt.Sprintf("%s-%s-%s", profile.Name, pod.Name, runSuffix),
+		podName:    fmt.Sprintf("%s-%s-%s", profile.Name, pod.Name, runSuffix),
+		kubeConfig: kubeConfig,
 	}
 	return target, nil
 }
@@ -296,4 +302,37 @@ func findStatefulSetByName(ctx context.Context, kubeclient kubernetes.Interface,
 // target.
 func (t *PodBackupTarget) PodName() string {
 	return t.podName
+}
+
+func (t *PodBackupTarget) CommandBefore(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) error {
+	log = log.With("type", "CommandBefore")
+	return t.runCommand(ctx, log, kubeclient, t.profile.CommandBefore)
+}
+
+func (t *PodBackupTarget) CommandAfter(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) error {
+	log = log.With("type", "CommandAfter")
+	return t.runCommand(ctx, log, kubeclient, t.profile.CommandAfter)
+}
+
+func (t *PodBackupTarget) runCommand(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, cmd ProfileCommand) error {
+	log = log.With("cmd", cmd.Cmd, "container", cmd.Container, "namespace", t.Pod.Namespace, "name", t.Pod.Name)
+	executor, err := rafdirExec.NewCommandExecutor(
+		t.kubeConfig, log,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create command executor: %w", err)
+	}
+
+	var stderr, stdout bytes.Buffer
+	err = executor.ExecuteCommandInPod(ctx, t.Pod.Name, t.Pod.Namespace, cmd.Cmd, cmd.Container, &stdout, &stderr)
+	if err != nil {
+		log.Error("Command execution failed", "stderr", stderr.String(), "stdout", stdout.String())
+		// Message from ExecuteCommandInPod is sufficient
+		return err
+	}
+
+	log.Debug("Finished command", "stdout", stdout.String(), "stderr", stderr.String())
+	log.Info("Command executed successfully")
+
+	return nil
 }

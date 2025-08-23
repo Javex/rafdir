@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"rafdir/internal"
 	"rafdir/internal/cli"
+	"rafdir/internal/client"
 	"rafdir/internal/db"
 	"rafdir/internal/meta"
 	"rafdir/internal/pvc"
@@ -22,7 +23,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -43,8 +43,6 @@ type SnapshotClientConfig struct {
 }
 
 func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, error) {
-	var kubeClient *kubernetes.Clientset
-	var csiClient *csiClientset.Clientset
 
 	var logLevel slog.Level
 	var dbLogLevel tracelog.LogLevel
@@ -71,35 +69,30 @@ func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, erro
 
 	log := slog.Default()
 
+	var kubeConfig *rest.Config
 	if cfg, err := rest.InClusterConfig(); err == nil {
-		kubeClient, err = InitK8sClient(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to create k8s client: %s", err)
-		}
-		csiClient, err = InitCSIClient(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to create csi client: %s", err)
-		}
+		kubeConfig = cfg
 	} else {
 		kubeconfig := os.Getenv("KUBECONFIG")
 		if kubeconfig == "" {
 			return nil, fmt.Errorf("Missing env var KUBECONFIG")
 		}
 
-		cfg, err := GetK8sConfig(kubeconfig)
+		cfg, err := client.GetK8sConfig(kubeconfig)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to get k8s config: %s", err)
 		}
 
-		kubeClient, err = InitK8sClient(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to create k8s client: %s", err)
-		}
+		kubeConfig = cfg
+	}
 
-		csiClient, err = InitCSIClient(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to create csi client: %s", err)
-		}
+	kubeClient, err := client.InitK8sClient(kubeConfig)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create k8s client: %s", err)
+	}
+	csiClient, err := client.InitCSIClient(kubeConfig)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create csi client: %s", err)
 	}
 
 	config, err := internal.LoadConfigFromKubernetes(
@@ -137,8 +130,13 @@ func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, erro
 		return nil, fmt.Errorf("Failed to connect to database: %s", err)
 	}
 
+	if kubeConfig == nil {
+		return nil, fmt.Errorf("kubeConfig is nil, must be set")
+	}
+
 	client := &SnapshotClient{
 		kubeClient:        kubeClient,
+		kubeConfig:        kubeConfig,
 		csiClient:         csiClient,
 		db:                dbConn,
 		queries:           db.New(dbConn),
@@ -181,6 +179,7 @@ func (l *DbLogger) Log(ctx context.Context, level tracelog.LogLevel, msg string,
 
 type SnapshotClient struct {
 	kubeClient        kubernetes.Interface
+	kubeConfig        *rest.Config
 	csiClient         csiClientset.Interface
 	db                *pgx.Conn
 	queries           *db.Queries
@@ -303,13 +302,26 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 	runSuffix := generateRunSuffix()
 	config := s.config
 	repos := config.Repositories
-	target, err := profile.BackupTarget(ctx, log, s.kubeClient, runSuffix)
+	target, err := profile.BackupTarget(ctx, log, s.kubeClient, s.kubeConfig, runSuffix)
 	if err != nil {
 		return fmt.Errorf("Failed to BackupTarget: %s", err)
 	}
 
 	podName := target.PodName()
 	configMapName := fmt.Sprintf("%s-%s", profile.Name, runSuffix)
+
+	if profile.CommandBefore.Cmd != "" {
+		podTarget, ok := target.(*internal.PodBackupTarget)
+		if !ok {
+			log.Error("CommandBefore requires a PodBackupTarget")
+			return fmt.Errorf("CommandBefore requires a PodBackupTarget")
+		}
+		err := podTarget.CommandBefore(ctx, log, s.kubeClient)
+		if err != nil {
+			log.Error("Failed to run CommandBefore", "err", err)
+			return fmt.Errorf("error running CommandBefore: %w", err)
+		}
+	}
 
 	var scaleUp func()
 	if profile.Stop {
@@ -365,7 +377,7 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 		// error and we need to avoid causing it by putting a similar check here.
 		var stdInTarget *internal.PodBackupTarget
 		if profile.StdInSelector != "" {
-			stdInTarget, err = profile.StdInTarget(ctx, s.kubeClient, runSuffix)
+			stdInTarget, err = profile.StdInTarget(ctx, s.kubeClient, s.kubeConfig, runSuffix)
 			if err != nil {
 				log.Error("Failed to get StdInTarget", "err", err)
 				return fmt.Errorf("Failed to StdInTarget: %s", err)
@@ -530,35 +542,20 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 	// debugging
 	s.DeletePod(ctx, podName)
 
+	if profile.CommandAfter.Cmd != "" {
+		podTarget, ok := target.(*internal.PodBackupTarget)
+		if !ok {
+			log.Error("CommandAfter requires a PodBackupTarget")
+			return fmt.Errorf("CommandAfter requires a PodBackupTarget")
+		}
+		err := podTarget.CommandAfter(ctx, log, s.kubeClient)
+		if err != nil {
+			log.Error("Failed to run CommandAfter", "err", err)
+			return fmt.Errorf("error running CommandAfter: %w", err)
+		}
+	}
+
 	return nil
-}
-
-func GetK8sConfig(kubeconfig string) (*rest.Config, error) {
-	// Build the config from the kubeconfig file
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build kubeconfig: %w", err)
-	}
-
-	return config, err
-}
-
-func InitK8sClient(config *rest.Config) (*kubernetes.Clientset, error) {
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
-	}
-
-	return clientset, nil
-}
-
-func InitCSIClient(config *rest.Config) (*csiClientset.Clientset, error) {
-	csiClient, err := csiClientset.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create CSI client: %w", err)
-	}
-
-	return csiClient, nil
 }
 
 func (s *SnapshotClient) ScaleTo(ctx context.Context, namespace string, deploymentName string, replicas int32) (int32, error) {

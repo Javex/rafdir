@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	backupExec "rafdir/internal/backup/exec"
+	rafdirExec "rafdir/internal/exec"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -130,10 +130,13 @@ func (b *Backup) Run() []error {
 		}
 
 		ctx := context.Background()
-		err = backupExec.ExecuteCommandInPod(
+		executor, err := rafdirExec.NewCommandExecutor(b.Kubeconfig, log)
+		if err != nil {
+			return []error{fmt.Errorf("error creating executor: %w", err)}
+		}
+
+		err = executor.ExecuteWithStdOut(
 			ctx,
-			b.KubernetesClient,
-			b.Kubeconfig,
 			b.StdInPod,
 			b.StdInNamespace,
 			b.StdInCommand,

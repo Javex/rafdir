@@ -11,6 +11,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/yaml"
 )
 
@@ -40,13 +41,17 @@ var tomlTemplate = template.Must(template.New("tomlTemplate").Parse(`
 `))
 
 type Profile struct {
-	Disabled       bool     `json:"disabled"`
-	Namespace      string   `json:"namespace"`
-	Deployment     string   `json:"deployment"`
-	StatefulSet    string   `json:"statefulset"`
-	Selector       string   `json:"selector"`
-	Node           string   `json:"node"`
-	Stop           bool     `json:"stop"`
+	Disabled    bool   `json:"disabled"`
+	Namespace   string `json:"namespace"`
+	Deployment  string `json:"deployment"`
+	StatefulSet string `json:"statefulset"`
+	Selector    string `json:"selector"`
+	Node        string `json:"node"`
+	Stop        bool   `json:"stop"`
+
+	CommandBefore ProfileCommand `json:"command-before"`
+	CommandAfter  ProfileCommand `json:"command-after"`
+
 	Host           string   `json:"host"`
 	Folders        []string `json:"folders"`
 	StdInCommand   string   `json:"stdin-command"`
@@ -57,6 +62,11 @@ type Profile struct {
 	StorageClass   string   `json:"storage-class"`
 
 	Name string
+}
+
+type ProfileCommand struct {
+	Cmd       string `json:"cmd"`
+	Container string `json:"container"`
 }
 
 func ProfilesFromGlobalConfigMap(config *Config, globalConfigMap *corev1.ConfigMap, profileFilter string) (map[string]Profile, []error) {
@@ -133,6 +143,14 @@ func (p Profile) Validate() error {
 		return fmt.Errorf("StorageClass is required for profile %s", p.Name)
 	}
 
+	if p.CommandBefore.Cmd == "" && p.CommandBefore.Container != "" {
+		return fmt.Errorf("CommandBefore has container selected, but no command, this is invalid for profile %s", p.Name)
+	}
+
+	if p.CommandAfter.Cmd == "" && p.CommandAfter.Container != "" {
+		return fmt.Errorf("CommandAfter has container selected, but no command, this is invalid for profile %s", p.Name)
+	}
+
 	// Run checks depending on profile type
 	if p.Node != "" {
 		if err := p.validateNode(); err != nil {
@@ -186,6 +204,10 @@ func (p Profile) Validate() error {
 			return fmt.Errorf("StdInFilename is only allowed when StdInCommand is set for profile %s", p.Name)
 		}
 
+		if p.Stop && (p.CommandBefore.Cmd != "" || p.CommandAfter.Cmd != "") {
+			return fmt.Errorf("Stop and CommandBefore or CommandAfter cannot be combined for profile %s", p.Name)
+		}
+
 	}
 	return nil
 }
@@ -216,7 +238,19 @@ func (p Profile) validateNode() error {
 	}
 
 	if len(p.Folders) == 0 {
-		return fmt.Errorf("Folders is required f node is sepecified for profile %s", p.Name)
+		return fmt.Errorf("Folders is required if node is sepecified for profile %s", p.Name)
+	}
+
+	if p.Stop {
+		return fmt.Errorf("Stop is not allowed if node is sepecified for profile %s", p.Name)
+	}
+
+	if p.CommandBefore.Cmd != "" {
+		return fmt.Errorf("CommandBefore is not allowed if node is specified for profile %s", p.Name)
+	}
+
+	if p.CommandAfter.Cmd != "" {
+		return fmt.Errorf("CommandAfter is not allowed if node is specified for profile %s", p.Name)
 	}
 
 	return nil
@@ -278,19 +312,19 @@ func (p Profile) ToConfigMap(repos []Repository, backupNamespace, cmName, runSuf
 	return cm, nil
 }
 
-func (p *Profile) BackupTarget(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, runSuffix string) (BackupTarget, error) {
+func (p *Profile) BackupTarget(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface, kubeConfig *rest.Config, runSuffix string) (BackupTarget, error) {
 	var target BackupTarget
 	var err error
 
 	if p.Deployment != "" {
 		log.Debug("Creating backup target from deployment", "deployment", p.Deployment)
-		target, err = NewBackupTargetFromDeploymentName(ctx, log, kubeclient, p, runSuffix)
+		target, err = NewBackupTargetFromDeploymentName(ctx, log, kubeclient, kubeConfig, p, runSuffix)
 	} else if p.StatefulSet != "" {
 		log.Debug("Creating backup target from statefulset", "statefulset", p.StatefulSet)
-		target, err = NewBackupTargetFromStatefulSetName(ctx, log, kubeclient, p, runSuffix)
+		target, err = NewBackupTargetFromStatefulSetName(ctx, log, kubeclient, kubeConfig, p, runSuffix)
 	} else if p.Selector != "" {
 		log.Debug("Creating backup target from selector", "selector", p.Selector)
-		target, err = NewBackupTargetFromSelector(ctx, kubeclient, p.Namespace, p.Selector, p, runSuffix)
+		target, err = NewBackupTargetFromSelector(ctx, kubeclient, kubeConfig, p.Namespace, p.Selector, p, runSuffix)
 	} else if p.Node != "" {
 		log.Debug("Creating backup target from node", "node", p.Node)
 		target, err = NewBackupTargetFromNodeName(ctx, kubeclient, p, runSuffix)
@@ -305,14 +339,14 @@ func (p *Profile) BackupTarget(ctx context.Context, log *slog.Logger, kubeclient
 	return target, nil
 }
 
-func (p *Profile) StdInTarget(ctx context.Context, kubeclient kubernetes.Interface, runSuffix string) (*PodBackupTarget, error) {
+func (p *Profile) StdInTarget(ctx context.Context, kubeclient kubernetes.Interface, kubeConfig *rest.Config, runSuffix string) (*PodBackupTarget, error) {
 	log := slog.Default()
 	if p.StdInSelector == "" {
 		return nil, fmt.Errorf("Profile %s has no StdInSelector", p.Name)
 	}
 
 	log.Debug("Creating backup target from stdin selector", "selector", p.StdInSelector)
-	return NewBackupTargetFromSelector(ctx, kubeclient, p.StdInNamespace, p.StdInSelector, p, runSuffix)
+	return NewBackupTargetFromSelector(ctx, kubeclient, kubeConfig, p.StdInNamespace, p.StdInSelector, p, runSuffix)
 }
 
 // StdInCommandNamespace either returns the explicit namespace of

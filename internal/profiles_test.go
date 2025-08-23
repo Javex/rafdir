@@ -327,6 +327,48 @@ func TestProfilesFromYaml(t *testing.T) {
 			"testNamespace",
 			"", // expFilepath
 		},
+		{
+			"commandBeforeAndAfter",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          command-before:
+            cmd: echo foo
+            container: main
+          command-after:
+            cmd: echo foo
+            container: main
+          folders:
+            - /test/folder
+      `,
+			"",
+
+			map[string]internal.Profile{
+				"test": {
+					Name:       "test",
+					Namespace:  "testNamespace",
+					Deployment: "testDeployment",
+					Stop:       false,
+					CommandBefore: internal.ProfileCommand{
+						Cmd:       "echo foo",
+						Container: "main",
+					},
+					CommandAfter: internal.ProfileCommand{
+						Cmd:       "echo foo",
+						Container: "main",
+					},
+					Host:          "test.example.com",
+					Folders:       []string{"/test/folder"},
+					SnapshotClass: "testSnapshotClass",
+					StorageClass:  "testStorageClass",
+				},
+			},
+			"testNamespace",
+			"", // expFilepath
+		},
 	}
 
 	for _, tc := range tcs {
@@ -450,6 +492,43 @@ func TestProfilesFromYamlErrors(t *testing.T) {
       `,
 		},
 		{
+			"nodeWithStop",
+			`
+        test:
+          name: testName
+          node: test-node.cluster
+          stop: true
+          folders:
+            - /test/folder
+      `,
+		},
+		{
+			"nodeWithCommandBefore",
+			`
+        test:
+          name: testName
+          node: test-node.cluster
+          command-before:
+            cmd: echo foo
+            container: main
+          folders:
+            - /test/folder
+      `,
+		},
+		{
+			"nodeWithCommandAfter",
+			`
+        test:
+          name: testName
+          node: test-node.cluster
+          command-after:
+            cmd: echo foo
+            container: main
+          folders:
+            - /test/folder
+      `,
+		},
+		{
 			"FoldersAndCommandWithoutFilename",
 			`
         test:
@@ -474,6 +553,72 @@ func TestProfilesFromYamlErrors(t *testing.T) {
           stdin-command: test command
           stdin-namespace: testCmdNamespace
           stdin-filename: testfile
+          folders:
+            - /test/folder
+      `,
+		},
+		{
+			"commandBeforeEmptyCmdButContainer",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          command-before:
+            container: main
+          command-after:
+            cmd: echo foo
+            container: main
+          folders:
+            - /test/folder
+      `,
+		},
+		{
+			"commandAfterEmptyCmdButContainer",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          command-before:
+            cmd: echo foo
+            container: main
+          command-after:
+            container: main
+          folders:
+            - /test/folder
+      `,
+		},
+		{
+			"commandBeforeAndStop",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          stop: true
+          command-before:
+            cmd: echo foo
+            container: main
+          folders:
+            - /test/folder
+      `,
+		},
+		{
+			"commandAfterAndStop",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          deployment: testDeployment
+          host: test.example.com
+          stop: true
+          command-after:
+            cmd: echo foo
+            container: main
           folders:
             - /test/folder
       `,

@@ -1,9 +1,10 @@
-package internal
+package pvc
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
+	"rafdir/internal/meta"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +33,10 @@ type PvcSnapshotterConfig struct {
 	SnapshotClass string
 	// StorageClass is the name of the StorageClass used for the temporary PVC.
 	StorageClass string
+	// ScaleUp is a function that will be called once the source PVC has been
+	// processed and the service can be started again. It can be nil if the
+	// service was not stopped. In that case no call will be attempted.
+	ScaleUp func()
 
 	WaitTimeout            time.Duration
 	SnapshotContentTimeout time.Duration
@@ -43,6 +48,7 @@ type PvcSnapshotter struct {
 	runSuffix     string
 	snapshotClass string
 	storageClass  string
+	scaleUp       func()
 
 	waitTimeout            time.Duration
 	snapshotContentTimeout time.Duration
@@ -68,6 +74,7 @@ func NewPvcSnapshotter(log *slog.Logger, kubeClient kubernetes.Interface, csiCli
 		runSuffix:     cfg.RunSuffix,
 		snapshotClass: cfg.SnapshotClass,
 		storageClass:  cfg.StorageClass,
+		scaleUp:       cfg.ScaleUp,
 
 		waitTimeout:            cfg.WaitTimeout,
 		snapshotContentTimeout: cfg.SnapshotContentTimeout,
@@ -81,7 +88,7 @@ func NewPvcSnapshotter(log *slog.Logger, kubeClient kubernetes.Interface, csiCli
 
 // BackupPvcFromSourcePvc takes a source PVC and provides a new PVC in the
 // target namespace that is a snapshot of the source PVC.
-func (s *PvcSnapshotter) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *corev1.PersistentVolumeClaim, scaleUp func()) (*corev1.PersistentVolumeClaim, error) {
+func (s *PvcSnapshotter) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
 	if s.sourceNamespace != "" {
 		s.log.Error("PvcSnapshotter already used, cannot use again", "sourceNamespace", s.sourceNamespace)
 		return nil, fmt.Errorf("PvcSnapshotter already used for sourceNamespace %s", s.sourceNamespace)
@@ -119,13 +126,8 @@ func (s *PvcSnapshotter) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *
 		return nil, fmt.Errorf("Failed to snapshotHandleFromContent: %s", err)
 	}
 
-	// This is a function that is passed in to scale up the deployment in case it
-	// was stopped. Runs after there's a handle because that indicates that the
-	// snapshot has been created and the original volume can be used again.
-	if scaleUp != nil {
-		scaleUp()
-		s.log.Debug("Scaled back up")
-	}
+	// Snapshot has been finished, service can start back up
+	s.doScaleUp()
 
 	err = s.snapshotContentFromHandle(ctx, snapshotContentName, contentHandle, snapshotName)
 	if err != nil {
@@ -150,6 +152,22 @@ func (s *PvcSnapshotter) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *
 	s.destPvcName = backupPVCName
 
 	return destPvc, nil
+}
+
+// doScaleUp calls the scaleUp function passed during object creation. It
+// ensures to only call it once, repeated calls will be a no-op. This is
+// because the passed in function does not expect to be called more than once.
+func (s *PvcSnapshotter) doScaleUp() {
+	// This is a function that is passed in to scale up the deployment in case it
+	// was stopped. Runs after there's a handle because that indicates that the
+	// snapshot has been created and the original volume can be used again.
+	if s.scaleUp != nil {
+		s.scaleUp()
+		s.log.Debug("Scaled back up")
+		// Ensure function is only called once
+		s.scaleUp = nil
+	}
+
 }
 
 func (s *PvcSnapshotter) Cleanup(ctx context.Context) {
@@ -245,7 +263,7 @@ func (s *PvcSnapshotter) takeSnapshot(ctx context.Context, snapshotName string, 
 	}
 
 	snapshot := volumesnapshot.VolumeSnapshot{
-		ObjectMeta: NewObjectMeta(snapshotName, namespace, s.runSuffix),
+		ObjectMeta: meta.NewObjectMeta(snapshotName, namespace, s.runSuffix),
 		Spec: volumesnapshot.VolumeSnapshotSpec{
 			VolumeSnapshotClassName: &s.snapshotClass,
 			Source: volumesnapshot.VolumeSnapshotSource{
@@ -281,7 +299,7 @@ func (s *PvcSnapshotter) snapshotFromContent(ctx context.Context, snapshotName s
 	}
 
 	snapshot := volumesnapshot.VolumeSnapshot{
-		ObjectMeta: NewObjectMeta(snapshotName, s.destNamespace, s.runSuffix),
+		ObjectMeta: meta.NewObjectMeta(snapshotName, s.destNamespace, s.runSuffix),
 		Spec: volumesnapshot.VolumeSnapshotSpec{
 			Source: volumesnapshot.VolumeSnapshotSource{
 				VolumeSnapshotContentName: contentName,
@@ -324,7 +342,7 @@ func (s *PvcSnapshotter) snapshotContentFromHandle(ctx context.Context, snapshot
 	}
 
 	snapshotContent := volumesnapshot.VolumeSnapshotContent{
-		ObjectMeta: NewObjectMeta(snapshotContentName, "", s.runSuffix),
+		ObjectMeta: meta.NewObjectMeta(snapshotContentName, "", s.runSuffix),
 		Spec: volumesnapshot.VolumeSnapshotContentSpec{
 			DeletionPolicy:          volumesnapshot.VolumeSnapshotContentDelete,
 			Driver:                  s.snapshotDriver,
@@ -467,7 +485,7 @@ func (s *PvcSnapshotter) pvcFromSnapshot(ctx context.Context, snapshotName strin
 	apiGroup := volumesnapshot.GroupName
 
 	pvc = &corev1.PersistentVolumeClaim{
-		ObjectMeta: NewObjectMeta(pvcName, s.destNamespace, s.runSuffix),
+		ObjectMeta: meta.NewObjectMeta(pvcName, s.destNamespace, s.runSuffix),
 		Spec: corev1.PersistentVolumeClaimSpec{
 			DataSource: &corev1.TypedLocalObjectReference{
 				Name:     snapshotName,

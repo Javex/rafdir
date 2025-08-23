@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"rafdir/internal/meta"
 	"text/template"
 
 	corev1 "k8s.io/api/core/v1"
@@ -247,7 +248,7 @@ func (p Profile) fullProfileName(repoName RepositoryName) string {
 
 func (p Profile) ToConfigMap(repos []Repository, backupNamespace, cmName, runSuffix string) (*corev1.ConfigMap, error) {
 	cm := &corev1.ConfigMap{
-		ObjectMeta: NewObjectMeta(cmName, backupNamespace, runSuffix),
+		ObjectMeta: meta.NewObjectMeta(cmName, backupNamespace, runSuffix),
 		Data:       make(map[string]string),
 	}
 

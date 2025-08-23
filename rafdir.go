@@ -10,6 +10,8 @@ import (
 	"rafdir/internal"
 	"rafdir/internal/cli"
 	"rafdir/internal/db"
+	"rafdir/internal/meta"
+	"rafdir/internal/pvc"
 	"strings"
 	"syscall"
 	"time"
@@ -432,49 +434,41 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 			case internal.VolumeTypePVC:
 				// TODO: Implement proper case handling for when to use the cloner vs
 				// the snapshotter
+				var pvcBackup pvc.BackupPvc
 				if profile.Name == "nextcloud-dev" {
 					if scaleUp != nil {
 						log.Error("pvcloner called with stop argument, not implemented yet")
 						return fmt.Errorf("stop not implemented for PV cloner yet")
 					}
-					cloner := internal.NewPvCloner(log, s.kubeClient, s.csiClient, internal.PvClonerConfig{
+					pvcBackup = pvc.NewPvCloner(log, s.kubeClient, s.csiClient, pvc.PvClonerConfig{
 						DestNamespace: s.config.BackupNamespace,
 						RunSuffix:     runSuffix,
 						WaitTimeout:   s.config.WaitTimeout,
 						SleepDuration: s.config.SleepDuration,
 					})
-					// TODO: There's lots of duplication here, maybe this should be an
-					// interface?
-					cleanup = append(cleanup, func() { cloner.Cleanup(ctx) })
-					backupPvc, err := cloner.BackupPvcFromSourcePvc(ctx, volumeInfo.PVC)
-					if err != nil {
-						return fmt.Errorf("Failed to BackupPvcFromSourcePvc for %s: %w", folder, err)
-					}
-
-					s.AddPvcToPod(backupPod, volumeInfo.VolumeMount, backupPvc.Name)
-
 				} else {
 					// Handle PVC volumes with snapshots
-					snapshotter := internal.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, internal.PvcSnapshotterConfig{
+					pvcBackup = pvc.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, pvc.PvcSnapshotterConfig{
 						DestNamespace:          s.config.BackupNamespace,
 						RunSuffix:              runSuffix,
 						SnapshotClass:          profile.SnapshotClass,
 						StorageClass:           profile.StorageClass,
+						ScaleUp:                scaleUp,
 						WaitTimeout:            s.config.WaitTimeout,
 						SnapshotContentTimeout: s.config.SnapshotContentTimeout,
 						SleepDuration:          s.config.SleepDuration,
 					})
-					// Schedule cleanup before kicking off the resource creation. If no
-					// resources end up being created this does nothing.
-					cleanup = append(cleanup, func() { snapshotter.Cleanup(ctx) })
 
-					backupPvc, err := snapshotter.BackupPvcFromSourcePvc(ctx, volumeInfo.PVC, scaleUp)
-					if err != nil {
-						return fmt.Errorf("Failed to BackupPvcFromSourcePvc for %s: %w", folder, err)
-					}
-
-					s.AddPvcToPod(backupPod, volumeInfo.VolumeMount, backupPvc.Name)
 				}
+				// Schedule cleanup before kicking off the resource creation. If no
+				// resources end up being created this does nothing.
+				cleanup = append(cleanup, func() { pvcBackup.Cleanup(ctx) })
+
+				backupPvc, err := pvcBackup.BackupPvcFromSourcePvc(ctx, volumeInfo.PVC)
+				if err != nil {
+					return fmt.Errorf("Failed to BackupPvcFromSourcePvc for %s: %w", folder, err)
+				}
+				s.AddPvcToPod(backupPod, volumeInfo.VolumeMount, backupPvc.Name)
 
 			case internal.VolumeTypeNFS:
 				// Handle NFS volumes directly (no snapshot needed)
@@ -639,7 +633,7 @@ func (s *SnapshotClient) DeleteConfigMap(ctx context.Context, configMapName stri
 func (s *SnapshotClient) NewBackupPod(podName, runSuffix string) *corev1.Pod {
 	optional := false
 	pod := &corev1.Pod{
-		ObjectMeta: internal.NewObjectMeta(podName, s.config.BackupNamespace, runSuffix),
+		ObjectMeta: meta.NewObjectMeta(podName, s.config.BackupNamespace, runSuffix),
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{

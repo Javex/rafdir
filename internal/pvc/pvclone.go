@@ -1,9 +1,10 @@
-package internal
+package pvc
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
+	"rafdir/internal/meta"
 	"time"
 
 	csiClientset "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned"
@@ -159,7 +160,7 @@ func (c *PvCloner) clonePv(ctx context.Context, sourcePv *corev1.PersistentVolum
 	}
 
 	destPv := &corev1.PersistentVolume{
-		ObjectMeta: NewObjectMeta(destPvName, "", c.runSuffix),
+		ObjectMeta: meta.NewObjectMeta(destPvName, "", c.runSuffix),
 		Spec: corev1.PersistentVolumeSpec{
 			AccessModes: sourcePv.Spec.AccessModes,
 			Capacity:    sourcePv.Spec.Capacity,
@@ -224,7 +225,7 @@ func (c *PvCloner) bindPvc(ctx context.Context, destPv *corev1.PersistentVolume)
 	destPvcName := destPv.ObjectMeta.Name
 	storageClassName := destPv.Spec.StorageClassName
 	destPvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: NewObjectMeta(destPvcName, c.destNamespace, c.runSuffix),
+		ObjectMeta: meta.NewObjectMeta(destPvcName, c.destNamespace, c.runSuffix),
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: destPv.Spec.AccessModes,
 			Resources: corev1.VolumeResourceRequirements{

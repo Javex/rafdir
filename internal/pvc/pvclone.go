@@ -7,7 +7,6 @@ import (
 	"rafdir/internal/meta"
 	"time"
 
-	csiClientset "github.com/kubernetes-csi/external-snapshotter/client/v8/clientset/versioned"
 	corev1 "k8s.io/api/core/v1"
 	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,11 +43,10 @@ type PvCloner struct {
 	destPvcName string
 
 	kubeClient kubernetes.Interface
-	csiClient  csiClientset.Interface
 	log        *slog.Logger
 }
 
-func NewPvCloner(log *slog.Logger, kubeClient kubernetes.Interface, csiClient csiClientset.Interface, cfg PvClonerConfig) *PvCloner {
+func NewPvCloner(log *slog.Logger, kubeClient kubernetes.Interface, cfg PvClonerConfig) *PvCloner {
 	cloner := &PvCloner{
 		destNamespace: cfg.DestNamespace,
 		runSuffix:     cfg.RunSuffix,
@@ -57,7 +55,6 @@ func NewPvCloner(log *slog.Logger, kubeClient kubernetes.Interface, csiClient cs
 
 		log:        log,
 		kubeClient: kubeClient,
-		csiClient:  csiClient,
 	}
 	return cloner
 }
@@ -73,7 +70,7 @@ func NewPvCloner(log *slog.Logger, kubeClient kubernetes.Interface, csiClient cs
 // been tested. Other drivers can be added after they've been tested to work.
 func (c *PvCloner) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
 	// Get current PV from PVC
-	sourcePv, err := c.findPvForPvc(ctx, sourcePvc)
+	sourcePv, err := FindPvForPvc(ctx, c.log, c.kubeClient, sourcePvc)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get source PV from PVC")
 	}
@@ -113,38 +110,6 @@ func (c *PvCloner) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *corev1
 	}
 
 	return destPvc, nil
-}
-
-// findPvForPvc looks up the PV that needs to be cloned from the PVC we're
-// trying to back up.
-func (c *PvCloner) findPvForPvc(ctx context.Context, sourcePvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolume, error) {
-	namespace := sourcePvc.ObjectMeta.Namespace
-	sourcePvcName := sourcePvc.ObjectMeta.Name
-	log := c.log.With("namespace", namespace, "sourcePvcName", sourcePvcName)
-	phase := sourcePvc.Status.Phase
-	if phase != corev1.ClaimBound {
-		log.Error("Unexpected phase, expected 'Bound'", "phase", phase)
-		return nil, fmt.Errorf("invalid phase '%s', expected 'Bound'", phase)
-	}
-	log.Debug("Volume is bound", "phase", phase)
-
-	pvName := sourcePvc.Spec.VolumeName
-	if pvName == "" {
-		log.Error("VolumeName is empty even though volume is bound")
-		return nil, fmt.Errorf("empty VolumeName")
-	}
-	log = log.With("pvName", pvName)
-
-	pv, err := c.kubeClient.CoreV1().PersistentVolumes().Get(ctx, pvName, metav1.GetOptions{})
-	if err != nil {
-		if k8sErrors.IsNotFound(err) {
-			log.Error("Bound volume not found", "err", err)
-			return nil, fmt.Errorf("volume not found: %s", err)
-		}
-		log.Error("Unexpected error when looking up PV", "err", err)
-		return nil, err
-	}
-	return pv, nil
 }
 
 // clonePv creates a new PV based on an existing PV. It makes a slightly

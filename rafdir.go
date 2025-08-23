@@ -432,22 +432,31 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 
 			switch volumeInfo.Type {
 			case internal.VolumeTypePVC:
-				// TODO: Implement proper case handling for when to use the cloner vs
-				// the snapshotter
+				// Find out which backup method to use for this PVC
+				backupMethod, err := pvc.BackupPvcMethodForPvc(ctx, log, s.kubeClient, volumeInfo.PVC)
+				if err != nil {
+					return fmt.Errorf("failed to determine backup method: %w", err)
+				}
+
+				// Create the right object based on the chosen method
 				var pvcBackup pvc.BackupPvc
-				if profile.Name == "nextcloud-dev" {
+				switch backupMethod {
+				case pvc.BackupPvcMethodClone:
 					if scaleUp != nil {
 						log.Error("pvcloner called with stop argument, not implemented yet")
 						return fmt.Errorf("stop not implemented for PV cloner yet")
 					}
-					pvcBackup = pvc.NewPvCloner(log, s.kubeClient, s.csiClient, pvc.PvClonerConfig{
+					log.Info("Using cloner for backup of PVC", "pvcName", volumeInfo.PVC.Name)
+					// Handle PVC volume with cloner
+					pvcBackup = pvc.NewPvCloner(log, s.kubeClient, pvc.PvClonerConfig{
 						DestNamespace: s.config.BackupNamespace,
 						RunSuffix:     runSuffix,
 						WaitTimeout:   s.config.WaitTimeout,
 						SleepDuration: s.config.SleepDuration,
 					})
-				} else {
-					// Handle PVC volumes with snapshots
+				case pvc.BackupPvcMethodSnapshot:
+					log.Info("Using snapshotter for backup of PVC", "pvcName", volumeInfo.PVC.Name)
+					// Handle PVC volume with snapshotter
 					pvcBackup = pvc.NewPvcSnapshotter(log, s.kubeClient, s.csiClient, pvc.PvcSnapshotterConfig{
 						DestNamespace:          s.config.BackupNamespace,
 						RunSuffix:              runSuffix,
@@ -458,8 +467,12 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 						SnapshotContentTimeout: s.config.SnapshotContentTimeout,
 						SleepDuration:          s.config.SleepDuration,
 					})
-
+				default:
+					return fmt.Errorf("unexpected backup method: '%s'", backupMethod)
 				}
+
+				// Create & add the PVC with backup data
+
 				// Schedule cleanup before kicking off the resource creation. If no
 				// resources end up being created this does nothing.
 				cleanup = append(cleanup, func() { pvcBackup.Cleanup(ctx) })

@@ -5,13 +5,6 @@ metadata:
     {{- include "rafdir.labels" . | nindent 4 }}
   name: {{ include "rafdir.name" . }}-config
 data:
-  {{- $root := . }}
-  {{- range $name, $config := .Values.storageClasses }}
-  {{- if $config.isDefaultClass }}
-  defaultStorageClass: {{ include "rafdir.name" $root }}-{{ $name }}
-  {{- end }}
-  {{- end }}
-
   profiles.yaml: |
     {{- index .Values.configuration | nindent 4 }}
 

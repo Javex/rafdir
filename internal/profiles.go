@@ -89,6 +89,7 @@ func ProfilesFromGlobalConfigMap(config *Config, globalConfigMap *corev1.ConfigM
 	// Parse the yaml
 	unmarshalErr := yaml.Unmarshal([]byte(profilesString), &profiles)
 	if unmarshalErr != nil {
+		log.Error("Error parsing profiles yaml", "err", unmarshalErr)
 		return nil, []error{unmarshalErr}
 	}
 
@@ -111,14 +112,6 @@ func ProfilesFromGlobalConfigMap(config *Config, globalConfigMap *corev1.ConfigM
 			continue
 		}
 
-		if profile.SnapshotClass == "" {
-			profile.SnapshotClass = config.SnapshotClass
-		}
-
-		if profile.StorageClass == "" {
-			profile.StorageClass = config.DefaultStorageClass
-		}
-
 		// Validate the profile
 		err := profile.Validate()
 		if err != nil {
@@ -135,14 +128,6 @@ func ProfilesFromGlobalConfigMap(config *Config, globalConfigMap *corev1.ConfigM
 
 func (p Profile) Validate() error {
 	// Check for any type of profile
-	if p.SnapshotClass == "" {
-		return fmt.Errorf("SnapshotClass is required for profile %s", p.Name)
-	}
-
-	if p.StorageClass == "" {
-		return fmt.Errorf("StorageClass is required for profile %s", p.Name)
-	}
-
 	if p.CommandBefore.Cmd == "" && p.CommandBefore.Container != "" {
 		return fmt.Errorf("CommandBefore has container selected, but no command, this is invalid for profile %s", p.Name)
 	}
@@ -157,6 +142,14 @@ func (p Profile) Validate() error {
 			return err
 		}
 	} else {
+		if p.SnapshotClass == "" {
+			return fmt.Errorf("SnapshotClass is required for profile %s", p.Name)
+		}
+
+		if p.StorageClass == "" {
+			return fmt.Errorf("StorageClass is required for profile %s", p.Name)
+		}
+
 		if p.Namespace == "" {
 			return fmt.Errorf("Namespace is required for profile %s", p.Name)
 		}

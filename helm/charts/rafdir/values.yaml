@@ -1,0 +1,182 @@
+# Create a storage class for each driver that you want to back up volumes from:
+# These classes are specifically for backups and should not be used otherwise.
+# Each class here should have a corresponding source storage class that it
+# matches with. Create multiple entries here if you want to back up multiple
+# classes, even if they're from the same provisioner. The main reason for using
+# a different class is that the reclaimPolicy is set to Delete since these
+# volumes will only be used for snapshots and those should get cleaned up after
+# the backup.
+storageClasses:
+  # The key can be anything, it will be used as a suffix for the name of the
+  # resource so it should be short and a valid DNS name
+  topolvm:
+    # Must match the provisioner of PVCs you want to back up
+    provisioner: topolvm.io
+    # Depends on the provisioner, should match the regular storage class you
+    # use for it
+    volumeBindingMode: WaitForFirstConsumer
+    # Optional, can be any valid mount options
+    mountOptions:
+      - discard
+    # Depends on the provisioner but very likely should match the regular
+    # storage class for that provisioner.
+    parameters:
+      csi.storage.k8s.io/fstype: ext4
+      topolvm.io/device-class: ssd
+
+# You need a database to store some metadata. Only postgres is supported at the
+# moment. The database name must be "rafdir".
+db:
+  host: "db.postgres.svc.cluster.local:5432"
+  user: rafdir
+  pass: changeme
+
+# This is the base configuration for resticprofile. You can add any options
+# under default_configuration, but don't change the defaults that are already
+# there, it's untested.
+configuration: |
+  version: "1"
+  includes:
+    - profiles.d/*.toml
+
+  default_configuration:
+    cache-dir: /var/cache/restic
+    backup:
+      exclude-caches: true
+
+# Currently these repositories are kind of built-in with assumptions so I don't
+# expect it to work with other setups though you can certainly remove them.
+repositories:
+  backblaze:
+    # Keep this to ensure the defaults from above are respected
+    inherit: default_configuration
+    # Change this to your backblaze URL
+    repository: "s3:s3.eu-central-003.backblazeb2.com/<your backblaze bucket>"
+
+  local:
+    # Keep this to ensure the defaults from above are respected
+    inherit: default_configuration
+    # I think this is hardcoded in the application at the moment, maybe don't
+    # change it.
+    repository: "/mnt/restic-repo"
+
+# Each profile should be a particular app you want to back up, for example a
+# deployment. There's
+profiles:
+  example:
+    # This profile will be skipped if this is set. Defaults to false.
+    disabled: true
+
+    # namespace of your application. If only taking a command-based backup (for
+    # example, database) and no file system backup (no folders), then select
+    # the namespace you want to run the backup command in (e.g. your database
+    # namespace)
+    namespace: default
+
+    # A selector to find the pod to back up.
+    selector: app.kubernetes.io/name=example
+
+    # Alternatively, use the name of a deployment. rafdir will extract the
+    # selector from the deployment to find the pods.
+
+    #deployment: example
+    # Or you can use a statefulset in a similar way to deployment
+
+    #statefulset: example
+
+    # Chose the volume snapshot class to use for snapshots on this profile.
+    # This is a mandatory field on profiles with PVCs to back up, i.e. those
+    # that have "folders" specified and run in pods (i.e. not the "node"
+    # special case). The VolumeSnapshotClass must exist already, rafdir does
+    # not create it.
+    snapshot-class: topolvm
+
+    # Storage class to use, see the explanation on storageClasses above. Note
+    # that the name must be the full final resource name of the storage class.
+    # Install the chart first without any profiles to see what the name will
+    # be, then reference it here.
+    storage-class: rafdir-topolvm
+
+    # Enable this if you want the pods stopped before taking a backup. This can
+    # be useful to avoid e.g. SQLite corruption. This feature is a bit unstable
+    # and if there are errors sometimes it fails to scale the application back
+    # up. Only tested with "deployment" above.
+    #stop: true
+
+    # Run a command before and after the backup. These commands can be useful
+    # when e.g. putting an application into maintenance mode rather than fully
+    # stopping the pod. They're not meant for taking backups (see stdin-command
+    # below), though they might work. I haven't tested that use case.
+    # You can either run one or both of these commands, as needed.
+    # command-before:
+    # Optional argument to pick which container to use. Very useful if more
+    # than one container runs in the pod. If not specified, let Kubernetes
+    # pick.
+    #  container: main
+    # The command to run. Will be run in sh -c "<cmd>". This field will
+    # determine if a command is attempted, if it is missing or empty, no
+    # command will run
+    #  cmd: |
+    #    echo "Hello, world!"
+    # See above for documentation on these arguments, they are identical.
+    # command-after:
+    #   container: main
+    #   cmd: |
+    #     echo "Hello, world!"
+
+    # It's possible to take a backup by running a command. There are two modes
+    # here:
+    # 1. This is the only backup being taken, no folders are being backed up
+    # 2. Both a command- and folder-based backup is taken
+    #
+    # In the first case, specify only stdin-command and stdin-filename. The
+    # command will be run against the target from above (e.g. selector) and in
+    # the desired namespace selected above. Since there are no folders, the
+    # file is written directly to restic using restic's stdin feature.
+    #
+    # In the second case, the file is written to the first folder in the list
+    # of backup targets and then the folder is backed up as normal. See the
+    # documentation on each option for details on how to control the behaviour.
+    #
+    # This option is mandatory if command-based backups are desired. You must
+    # specify a command and the command must be available inside the selected
+    # container. It will be started in a shell using sh -c "<stdin-command>".
+    # stdin-command: |
+    #   pg_dump -U postgres example | gzip
+    #
+    # Control the file name. This is mandatory. It'll either be the name of the
+    # file in the folder, or the name of the file inside the backup (if no
+    # folders exist)
+    # stdin-filename: "example-backup.sql.gz"
+    #
+    # If taking a backup of both folders & a command, provide a separate
+    # namespace for the command to run it. This can be the same namespace, but
+    # if you want folders and a command, you must specify this. This can only
+    # be used if both folders & command are desired. If using only a command,
+    # use the regular namespace field.
+    # stdin-namespace: example
+    #
+    # Selector to find the target to run the command in, in the stdin-namespace
+    # specified above. This can only be used if both folders & command are
+    # desired. If using only a command, use the regular selector.
+    # stdin-selector: app.kubernetes.io/name=example
+
+    # Pick the hostname under which the backup should run. This will be stored
+    # inside the restic backup to allow finding backups by host. You can choose
+    # any valid DNS name here.
+    # host: app.example.com
+
+    # Choose which folders you want to back up. The path should be chosen to
+    # match the selected pod. rafdir will look at all containers and mounted
+    # volumes to determine which PVC owns this path and then do its backups on
+    # the PVC. Note that subDir is untested and likely unsupported right now.
+    # The path should match exactly to ensure rafdir can find a match.
+    # folders:
+    #   - /data
+    #
+    # A special case: Instead of backing up a pod, rafdir can back up a host
+    # volume on a node. If you specify this, only specify the "folders" option
+    # and leave all others out as they aren't supported or don't make sense.
+    # Because host volumes are used you must have the appropriate permissions
+    # to launch containers with host volumes in rafdir's namespace.
+    # node: control-plane.example.com

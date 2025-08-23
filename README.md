@@ -13,12 +13,13 @@ This means there are a few requirements to running this:
 - The PVC driver must support snapshots and be set up correctly
 - An existing snapshot class must be available, it should have a retention
   policy of "Delete"
+- A Postgres database must be available
 
-A lot of values are hardcoded at the moment, but I'm open to pull requests to
+A lot of values are hard-coded at the moment, but I'm open to pull requests to
 make the system more dynamic. It currently just reflects my cluster setup.
 
-To install it, first create a `values.yaml` and a `secret.yaml` file. Adjust
-the values as needed. Lots of specific assumptions at the moment.
+To install it, first create a `values.yaml` and a `secrets.yaml` file. From the
+examples in `./helm/charts/rafdir`
 
 Then install the Helm chart:
 

@@ -393,6 +393,19 @@ func TestProfilesFromYamlErrors(t *testing.T) {
       `,
 		},
 		{
+			"deploymentAndSelectorMixed",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+			    deployment: testDeployment
+          selector: foo=bar
+          host: test.example.com
+          folders:
+            - /test/folder
+      `,
+		},
+		{
 			"nodeAndStatefulSetMixed",
 			`
         test:
@@ -470,7 +483,10 @@ func TestProfilesFromYamlErrors(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
 
-			config := &internal.Config{}
+			config := &internal.Config{
+				SnapshotClass:       "testSnapshotClass",
+				DefaultStorageClass: "testStorageClass",
+			}
 			configMap := &corev1.ConfigMap{
 				Data: map[string]string{
 					"profiles": tc.profileString,

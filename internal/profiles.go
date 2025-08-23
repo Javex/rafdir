@@ -147,11 +147,26 @@ func (p Profile) Validate() error {
 			return fmt.Errorf("Host is required for profile %s", p.Name)
 		}
 
-		if p.Deployment == "" && p.StatefulSet == "" && p.Selector == "" {
+		// Only exactly one way of finding pods is supported. If more than one is
+		// selected, return an error.
+		podFinderCount := 0
+		if p.Deployment != "" {
+			podFinderCount++
+		}
+
+		if p.StatefulSet != "" {
+			podFinderCount++
+		}
+
+		if p.Selector != "" {
+			podFinderCount++
+		}
+
+		if podFinderCount == 0 {
 			return fmt.Errorf("Either Deployment, StatefulSet, Selector or Node is required for profile %s", p.Name)
 		}
 
-		if p.Deployment != "" && p.StatefulSet != "" && p.Selector != "" {
+		if podFinderCount != 1 {
 			return fmt.Errorf("Only one of Deployment, StatefulSet, Selector or Node is allowed for profile %s", p.Name)
 		}
 

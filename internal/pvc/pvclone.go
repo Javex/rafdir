@@ -69,19 +69,23 @@ func NewPvCloner(log *slog.Logger, kubeClient kubernetes.Interface, cfg PvCloner
 // Currently, this function only accepts the driver "nfs.csi.k8s.io" as it has
 // been tested. Other drivers can be added after they've been tested to work.
 func (c *PvCloner) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
+	sourcePvcName := sourcePvc.Name
+	log := c.log.With("sourcePvcName", sourcePvcName, "namespace", sourcePvc.Namespace)
 	// Get current PV from PVC
 	sourcePv, err := FindPvForPvc(ctx, c.log, c.kubeClient, sourcePvc)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to get source PV from PVC")
+		log.Error("Failed to get source PV from PVC", "err", err)
+		return nil, fmt.Errorf("Failed to get source PV from PVC: %w", err)
 	}
+	log = log.With("sourcePvName", sourcePv.Name)
 
 	if sourcePv.Spec.CSI == nil {
-		c.log.Error("Expected .spec.csi to be set, but it's nil, invalid PV")
+		log.Error("Expected .spec.csi to be set, but it's nil, invalid PV")
 		return nil, fmt.Errorf("invalid PV, expected CSI object")
 	}
 
 	if driver, supportedDriver := sourcePv.Spec.CSI.Driver, "nfs.csi.k8s.io"; driver != supportedDriver {
-		c.log.Error("Invalid driver, not supported", "driver", driver, "supportedDriver", supportedDriver)
+		log.Error("Invalid driver, not supported", "driver", driver, "supportedDriver", supportedDriver)
 		return nil, fmt.Errorf("invalid driver '%s', expected '%s'", driver, supportedDriver)
 	}
 
@@ -89,23 +93,26 @@ func (c *PvCloner) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *corev1
 	// generated name like "pvc-<uuid>". In our case, since the PV is manually
 	// created and not dynamically from a PVC, using the PVC name makes more
 	// sense and looks nicer.
-	sourcePvcName := sourcePvc.ObjectMeta.Name
 	destPvName := fmt.Sprintf("%s-%s", sourcePvcName, c.runSuffix)
+	log = log.With("destPvName", destPvName)
 
 	// Create new PV from existing PV
 	destPv, err := c.clonePv(ctx, sourcePv, destPvName)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to clone source PV")
+		log.Error("Failed to clone source PV", "err", err)
+		return nil, fmt.Errorf("Failed to clone source PV, %w", err)
 	}
 	c.destPvName = destPv.ObjectMeta.Name
 	// Create new PVC using new PV
 	destPvc, err := c.bindPvc(ctx, destPv)
 	if err != nil {
+		log.Error("Failed to bind PVC for backup PV", "err", err)
 		return nil, fmt.Errorf("Failed to bind PVC for backup PV")
 	}
 	c.destPvcName = destPvc.ObjectMeta.Name
 
 	if err = c.waitPvc(ctx, destPvc); err != nil {
+		log.Error("Error waiting for PVC to bind", "err", err)
 		return nil, fmt.Errorf("error waiting for PVC to bind: %w", err)
 	}
 

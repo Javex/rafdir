@@ -491,6 +491,7 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 
 				backupPvc, err := pvcBackup.BackupPvcFromSourcePvc(ctx, volumeInfo.PVC)
 				if err != nil {
+					log.Error("Failed to create backup PVC from source PVC", "err", err, "folder", folder, "pvcName", volumeInfo.PVC.Name)
 					return fmt.Errorf("Failed to BackupPvcFromSourcePvc for %s: %w", folder, err)
 				}
 				s.AddPvcToPod(backupPod, volumeInfo.VolumeMount, backupPvc.Name)

@@ -9,6 +9,21 @@
     {{- if and (hasKey $profile "stop") $profile.stop }}
       {{- $_ := set (index $namespaces $profile.namespace) "stop" true }}
     {{- end }}
+
+    {{/* Detect any non-empty exec command */}}
+    {{- $hasExec := false }}
+
+    {{- range list "command-before" "command-after" }}
+      {{- $cmd := index $profile . }}
+      {{- if and (hasKey $profile .) (hasKey $cmd "cmd") (not (empty $cmd.cmd)) }}
+        {{- $hasExec = true }}
+        {{- break }}
+      {{- end }}
+    {{- end }}
+
+    {{- if $hasExec }}
+      {{- $_ := set (index $namespaces $profile.namespace) "exec" true }}
+    {{- end }}
   {{- end }}
 {{- end }}
 {{- $root := . }}
@@ -29,6 +44,11 @@ rules:
     verbs:
       - get
       - list
+  {{- if $nsData.exec }}
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  {{- end }}
   # Read deployments
   - apiGroups:
       - "apps"

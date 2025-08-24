@@ -1,3 +1,7 @@
+container:
+  # Optional list of arguments to pass to the binary
+  args: []
+
 # Create a storage class for each driver that you want to back up volumes from:
 # These classes are specifically for backups and should not be used otherwise.
 # Each class here should have a corresponding source storage class that it

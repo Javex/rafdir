@@ -22,6 +22,10 @@ spec:
           - name: rafdir
             image: "ghcr.io/javex/rafdir:latest"
             imagePullPolicy: Always
+            {{- with .Values.container.args }}
+            args:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
             env:
               - name: RAFDIR_DB_URL
                 valueFrom:

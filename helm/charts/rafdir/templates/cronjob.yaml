@@ -5,6 +5,9 @@ metadata:
   labels:
     {{- include "rafdir.labels" . | nindent 4}}
 spec:
+  # It doesn't make sense to run two backups in parallel. If the backup run
+  # takes so long that a new backup starts then the schedule is wrong.
+  concurrencyPolicy: Forbid
   # Cron schedule that runs once a day
   schedule: "0 0 * * *"
   jobTemplate:

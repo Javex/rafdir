@@ -28,6 +28,11 @@ func rootRun(clientConfig *rafdir.SnapshotClientConfig) error {
 		return fmt.Errorf("RAFDIR_DB_URL environment variable must be set")
 	}
 
+	clientConfig.SecretName = os.Getenv("RAFDIR_SECRET_NAME")
+	if clientConfig.SecretName == "" {
+		return fmt.Errorf("RAFDIR_SECRET_NAME environment variable must be set")
+	}
+
 	ctx := context.Background()
 	client, err := clientConfig.Build(ctx)
 	if err != nil {

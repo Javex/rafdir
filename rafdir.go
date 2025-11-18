@@ -39,7 +39,8 @@ type SnapshotClientConfig struct {
 	ImageTag          string
 	SkipIntervalCheck bool
 
-	DbUrl string
+	DbUrl      string
+	SecretName string
 }
 
 func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, error) {
@@ -113,6 +114,10 @@ func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, erro
 		return nil, fmt.Errorf("Missing DbUrl in config")
 	}
 
+	if s.SecretName == "" {
+		return nil, fmt.Errorf("Missing SecretName in config")
+	}
+
 	dbConfig, err := pgx.ParseConfig(s.DbUrl)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to parse database url: %s", err)
@@ -143,6 +148,7 @@ func (s *SnapshotClientConfig) Build(ctx context.Context) (*SnapshotClient, erro
 		config:            config,
 		log:               log,
 		skipIntervalCheck: s.SkipIntervalCheck,
+		secretName:        s.SecretName,
 	}
 
 	return client, err
@@ -186,6 +192,7 @@ type SnapshotClient struct {
 	config            *internal.Config
 	log               *slog.Logger
 	skipIntervalCheck bool
+	secretName        string
 }
 
 func (s *SnapshotClient) Close(ctx context.Context) {
@@ -668,7 +675,7 @@ func (s *SnapshotClient) NewBackupPod(podName, runSuffix string) *corev1.Pod {
 							ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "rafdir",
+										Name: s.secretName,
 									},
 									Key:      "backblaze-key-id",
 									Optional: &optional,
@@ -680,7 +687,7 @@ func (s *SnapshotClient) NewBackupPod(podName, runSuffix string) *corev1.Pod {
 							ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "rafdir",
+										Name: s.secretName,
 									},
 									Key:      "backblaze-application-key",
 									Optional: &optional,
@@ -692,7 +699,7 @@ func (s *SnapshotClient) NewBackupPod(podName, runSuffix string) *corev1.Pod {
 							ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "rafdir",
+										Name: s.secretName,
 									},
 									Key:      "restic-repo-password",
 									Optional: &optional,

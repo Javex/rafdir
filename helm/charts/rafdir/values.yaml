@@ -28,12 +28,13 @@ storageClasses:
       csi.storage.k8s.io/fstype: ext4
       topolvm.io/device-class: ssd
 
-# You need a database to store some metadata. Only postgres is supported at the
-# moment. The database name must be "rafdir".
-db:
-  host: "db.postgres.svc.cluster.local:5432"
-  user: rafdir
-  pass: changeme
+# You must create a secret with the configured name. It must contain the
+# following fields:
+# backblaze-key-id: Key ID to access the backup bucket
+# backblaze-application-key: Secret key for the backup bucket
+# restic-repo-password: Restic repo password set up during repo init
+# db-url: URL in the format "postgres://<user>:<password>@<host>/<dbname>?sslmode=disable"
+externalSecret: rafdir-secrets
 
 # This is the base configuration for resticprofile. You can add any options
 # under default_configuration, but don't change the defaults that are already

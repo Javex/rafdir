@@ -45,7 +45,7 @@ type PodBackupTarget struct {
 	Selector  string
 
 	// Support multiple volume types (PVCs and NFS)
-	volumeInfos map[string]*VolumeInfo
+	volumeInfos map[string]map[string]*VolumeInfo
 
 	profile *Profile
 
@@ -139,7 +139,7 @@ func NewBackupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Inte
 // It supports both PVCs and NFS volumes. It is an error if there are no volumes.
 func (t *PodBackupTarget) findVolumes(ctx context.Context, log *slog.Logger, kubeclient kubernetes.Interface) error {
 	if t.volumeInfos == nil {
-		t.volumeInfos = make(map[string]*VolumeInfo)
+		t.volumeInfos = make(map[string]map[string]*VolumeInfo)
 
 		for _, volume := range t.Pod.Spec.Volumes {
 			if err := t.processVolume(ctx, log, kubeclient, volume); err != nil {
@@ -175,10 +175,11 @@ func (t *PodBackupTarget) processPVCVolume(ctx context.Context, log *slog.Logger
 	if _, exists := t.volumeInfos[pvcName]; exists {
 		return fmt.Errorf("more than one PVC found for %s", pvcName)
 	}
+	t.volumeInfos[pvcName] = make(map[string]*VolumeInfo)
 
 	log.Info("Found PVC", "volumeName", volume.Name, "pvcName", pvcName)
 
-	volumeMount, err := t.findVolumeMount(volume.Name)
+	volumeMounts, err := t.findVolumeMount(volume.Name, log)
 	if err != nil {
 		return fmt.Errorf("volume mount not found for %s: %w", pvcName, err)
 	}
@@ -188,10 +189,12 @@ func (t *PodBackupTarget) processPVCVolume(ctx context.Context, log *slog.Logger
 		return err
 	}
 
-	t.volumeInfos[pvcName] = &VolumeInfo{
-		Type:        VolumeTypePVC,
-		VolumeMount: volumeMount,
-		PVC:         pvc,
+	for _, volumeMount := range volumeMounts {
+		t.volumeInfos[pvcName][volumeMount.MountPath] = &VolumeInfo{
+			Type:        VolumeTypePVC,
+			VolumeMount: volumeMount,
+			PVC:         pvc,
+		}
 	}
 
 	return nil
@@ -203,33 +206,43 @@ func (t *PodBackupTarget) processNFSVolume(ctx context.Context, log *slog.Logger
 	if _, exists := t.volumeInfos[volumeName]; exists {
 		return fmt.Errorf("more than one NFS volume found for %s", volumeName)
 	}
+	t.volumeInfos[volumeName] = make(map[string]*VolumeInfo)
 
 	log.Info("Found NFS", "volumeName", volume.Name, "server", volume.NFS.Server, "path", volume.NFS.Path)
 
-	volumeMount, err := t.findVolumeMount(volumeName)
+	volumeMounts, err := t.findVolumeMount(volumeName, log)
 	if err != nil {
 		return fmt.Errorf("volume mount not found for NFS volume %s: %w", volumeName, err)
 	}
 
-	t.volumeInfos[volumeName] = &VolumeInfo{
-		Type:        VolumeTypeNFS,
-		VolumeMount: volumeMount,
-		NFS:         volume.NFS,
+	for _, volumeMount := range volumeMounts {
+		t.volumeInfos[volumeName][volumeMount.MountPath] = &VolumeInfo{
+			Type:        VolumeTypeNFS,
+			VolumeMount: volumeMount,
+			NFS:         volume.NFS,
+		}
 	}
 
 	return nil
 }
 
 // findVolumeMount searches for a volume mount that matches the given volume name
-func (t *PodBackupTarget) findVolumeMount(volumeName string) (*corev1.VolumeMount, error) {
+func (t *PodBackupTarget) findVolumeMount(volumeName string, log *slog.Logger) ([]*corev1.VolumeMount, error) {
+	volumeMounts := make([]*corev1.VolumeMount, 0)
 	for _, container := range t.Pod.Spec.Containers {
 		for _, volumeMount := range container.VolumeMounts {
 			if volumeMount.Name == volumeName {
-				return &volumeMount, nil
+				log.Debug("Found mount path", "volumeName", volumeName, "mountPath", volumeMount.MountPath)
+				volumeMounts = append(volumeMounts, &volumeMount)
 			}
 		}
 	}
-	return nil, fmt.Errorf("no volume mount found for volume %s", volumeName)
+
+	if len(volumeMounts) == 0 {
+		return nil, fmt.Errorf("no volume mount found for volume %s", volumeName)
+	} else {
+		return volumeMounts, nil
+	}
 }
 
 // lookupPVC retrieves a PVC from the Kubernetes API
@@ -251,8 +264,13 @@ func (t *PodBackupTarget) GetFolderToVolumeMapping(ctx context.Context, log *slo
 	}
 
 	folderToVolumeInfo := make(map[string]*VolumeInfo)
-	for _, volumeInfo := range t.volumeInfos {
-		folderToVolumeInfo[volumeInfo.VolumeMount.MountPath] = volumeInfo
+	for _, volumeInfoPaths := range t.volumeInfos {
+		for _, volumeInfo := range volumeInfoPaths {
+			if existingVolumeInfo, ok := folderToVolumeInfo[volumeInfo.VolumeMount.MountPath]; ok {
+				return nil, fmt.Errorf("found mount path already in folderToVolumeInfo. existing: %v, new: %v", existingVolumeInfo, volumeInfo)
+			}
+			folderToVolumeInfo[volumeInfo.VolumeMount.MountPath] = volumeInfo
+		}
 	}
 
 	return folderToVolumeInfo, nil

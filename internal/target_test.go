@@ -640,6 +640,103 @@ func TestGetFolderToVolumeMapping(t *testing.T) {
 			nil,
 			"error looking up PVC testPvc",
 		},
+		{
+			"mutipleSubPathFolders",
+			"testDeployment",
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testDeployment",
+					Namespace: "test",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+				},
+			},
+			[]*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPod",
+						Namespace: "test",
+						Labels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "testNode",
+						Containers: []corev1.Container{
+							{
+								Name: "testContainer",
+								VolumeMounts: []corev1.VolumeMount{
+									{
+										Name:      "testPvc",
+										MountPath: "/test/mount/path/data",
+										SubPath:   "data",
+									},
+									{
+										Name:      "testPvc",
+										MountPath: "/test/mount/path/config",
+										SubPath:   "config",
+									},
+								},
+							},
+						},
+						Volumes: []corev1.Volume{
+							{
+								Name: "testPvc",
+								VolumeSource: corev1.VolumeSource{
+									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testPvc",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			[]*corev1.PersistentVolumeClaim{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPvc",
+						Namespace: "test",
+					},
+				},
+			},
+			map[string]*internal.VolumeInfo{
+				"/test/mount/path/config": {
+					Type: internal.VolumeTypePVC,
+					VolumeMount: &corev1.VolumeMount{
+						Name:      "testPvc",
+						MountPath: "/test/mount/path/config",
+						SubPath:   "config",
+					},
+					PVC: &corev1.PersistentVolumeClaim{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "testPvc",
+							Namespace: "test",
+						},
+					},
+				},
+				"/test/mount/path/data": {
+					Type: internal.VolumeTypePVC,
+					VolumeMount: &corev1.VolumeMount{
+						Name:      "testPvc",
+						MountPath: "/test/mount/path/data",
+						SubPath:   "data",
+					},
+					PVC: &corev1.PersistentVolumeClaim{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "testPvc",
+							Namespace: "test",
+						},
+					},
+				},
+			},
+			"",
+		},
 	}
 
 	for _, tc := range tcs {

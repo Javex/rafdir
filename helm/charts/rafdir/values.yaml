@@ -185,3 +185,11 @@ profiles:
     # Because host volumes are used you must have the appropriate permissions
     # to launch containers with host volumes in rafdir's namespace.
     # node: control-plane.example.com
+
+    # Override the default time rafdir waits for a backup to finish. If a
+    # profile takes quite a large backup then the default time might not be
+    # sufficient. In this case you can specify a larger value to ensure rafdir
+    # doesn't kill it prematurely.
+    # Format can be either a `float64` or `string`. If it's a `string` it gets
+    # passed to Go's `time.ParseDuration`.
+    # pod-wait-timeout: 1h

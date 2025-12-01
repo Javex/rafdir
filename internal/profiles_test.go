@@ -3,6 +3,7 @@ package internal_test
 import (
 	"rafdir/internal"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
@@ -348,6 +349,72 @@ func TestProfilesFromYaml(t *testing.T) {
 					Folders:       []string{"/test/folder"},
 					SnapshotClass: "testSnapshotClass",
 					StorageClass:  "testStorageClass",
+				},
+			},
+			"testNamespace",
+			"", // expFilepath
+		},
+		{
+			"customPodWaitTimeout",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          snapshot-class: testSnapshotClass
+          storage-class: testStorageClass
+          deployment: testDeployment
+          host: test.example.com
+          stop: true
+          pod-wait-timeout: 1h
+          folders:
+            - /test/folder
+      `,
+			"",
+
+			map[string]internal.Profile{
+				"test": {
+					Name:           "test",
+					Namespace:      "testNamespace",
+					Deployment:     "testDeployment",
+					Stop:           true,
+					Host:           "test.example.com",
+					Folders:        []string{"/test/folder"},
+					SnapshotClass:  "testSnapshotClass",
+					StorageClass:   "testStorageClass",
+					PodWaitTimeout: internal.Duration{1 * time.Hour},
+				},
+			},
+			"testNamespace",
+			"", // expFilepath
+		},
+		{
+			"customPodWaitTimeoutInt64",
+			`
+        test:
+          name: testName
+          namespace: testNamespace
+          snapshot-class: testSnapshotClass
+          storage-class: testStorageClass
+          deployment: testDeployment
+          host: test.example.com
+          stop: true
+          pod-wait-timeout: 3600000000000 # 1h in nanoseconds
+          folders:
+            - /test/folder
+      `,
+			"",
+
+			map[string]internal.Profile{
+				"test": {
+					Name:           "test",
+					Namespace:      "testNamespace",
+					Deployment:     "testDeployment",
+					Stop:           true,
+					Host:           "test.example.com",
+					Folders:        []string{"/test/folder"},
+					SnapshotClass:  "testSnapshotClass",
+					StorageClass:   "testStorageClass",
+					PodWaitTimeout: internal.Duration{1 * time.Hour},
 				},
 			},
 			"testNamespace",

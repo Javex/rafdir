@@ -541,7 +541,7 @@ func (s *SnapshotClient) profileBackup(ctx context.Context, profile *internal.Pr
 		return fmt.Errorf("Failed to CreateBackupPod: %s", err)
 	}
 
-	err = s.WaitPod(ctx, podName)
+	err = s.WaitPod(ctx, podName, profile.PodWaitTimeout.Duration)
 	if err != nil {
 		return fmt.Errorf("Failed to WaitPod: %s", err)
 	}
@@ -844,7 +844,7 @@ func (s *SnapshotClient) CreateBackupPod(ctx context.Context, profileConfigMap *
 	return nil
 }
 
-func (s *SnapshotClient) WaitPod(ctx context.Context, podName string) error {
+func (s *SnapshotClient) WaitPod(ctx context.Context, podName string, podWaitTimeout time.Duration) error {
 	log := s.log.With("namespace", s.config.BackupNamespace, "podName", podName)
 
 	// Wait for ContainerCreating to be finished
@@ -890,7 +890,7 @@ CreateLoop:
 
 	// Wait for pod to be finished running
 	// This waits longer to give the actual backup time to finish
-	runCtx, runCancel := context.WithTimeout(ctx, s.config.PodWaitTimeout)
+	runCtx, runCancel := context.WithTimeout(ctx, podWaitTimeout)
 	defer runCancel()
 	for {
 		select {

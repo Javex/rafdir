@@ -61,6 +61,8 @@ type Profile struct {
 	SnapshotClass  string   `json:"snapshot-class"`
 	StorageClass   string   `json:"storage-class"`
 
+	PodWaitTimeout Duration `json:"pod-wait-timeout"`
+
 	Name string
 }
 
@@ -110,6 +112,12 @@ func ProfilesFromGlobalConfigMap(config *Config, globalConfigMap *corev1.ConfigM
 			log.Info("Profile is disabled, skipping.", "profile", profileName)
 			delete(profiles, profileName)
 			continue
+		}
+
+		if profile.PodWaitTimeout.Duration == 0 {
+			log.Debug("Profile has empty pod-wait-timeout, using default", "profileName", profileName, "podWaitTimeout", config.PodWaitTimeout)
+			profile.PodWaitTimeout.Duration = config.PodWaitTimeout
+
 		}
 
 		// Validate the profile

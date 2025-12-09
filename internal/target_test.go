@@ -737,6 +737,106 @@ func TestGetFolderToVolumeMapping(t *testing.T) {
 			},
 			"",
 		},
+		{
+			"overlappingFolders",
+			"testDeployment",
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testDeployment",
+					Namespace: "test",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+				},
+			},
+			[]*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPod",
+						Namespace: "test",
+						Labels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "testNode",
+						Containers: []corev1.Container{
+							{
+								Name: "testContainer",
+								VolumeMounts: []corev1.VolumeMount{
+									{
+										Name:      "testPvc",
+										MountPath: "/test/mount/path",
+									},
+									{
+										Name:      "testNfs",
+										MountPath: "/test/mount/path/data",
+									},
+								},
+							},
+						},
+						Volumes: []corev1.Volume{
+							{
+								Name: "testPvc",
+								VolumeSource: corev1.VolumeSource{
+									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testPvc",
+									},
+								},
+							},
+							{
+								Name: "testNfs",
+								VolumeSource: corev1.VolumeSource{
+									NFS: &corev1.NFSVolumeSource{
+										Server: "nfs.example.com",
+										Path:   "/shared/data",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			[]*corev1.PersistentVolumeClaim{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPvc",
+						Namespace: "test",
+					},
+				},
+			},
+			map[string]*internal.VolumeInfo{
+				"/test/mount/path": {
+					Type: internal.VolumeTypePVC,
+					VolumeMount: &corev1.VolumeMount{
+						Name:      "testPvc",
+						MountPath: "/test/mount/path",
+					},
+					PVC: &corev1.PersistentVolumeClaim{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "testPvc",
+							Namespace: "test",
+						},
+					},
+				},
+				"/test/mount/path/data": {
+					Type: internal.VolumeTypeNFS,
+					VolumeMount: &corev1.VolumeMount{
+						Name:      "testNfs",
+						MountPath: "/test/mount/path/data",
+					},
+					NFS: &corev1.NFSVolumeSource{
+						Server: "nfs.example.com",
+						Path:   "/shared/data",
+					},
+				},
+			},
+			"",
+		},
 	}
 
 	for _, tc := range tcs {

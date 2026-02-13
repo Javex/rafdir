@@ -116,11 +116,18 @@ func NewBackupTargetFromSelector(ctx context.Context, kubeclient kubernetes.Inte
 		return nil, err
 	}
 
-	if len(podList.Items) != 1 {
-		return nil, fmt.Errorf("expected 1 pod, got %d", len(podList.Items))
+	runningPods := make([]corev1.Pod, 0)
+	for _, pod := range podList.Items {
+		if pod.Status.Phase == corev1.PodRunning {
+			runningPods = append(runningPods, pod)
+		}
 	}
 
-	pod := podList.Items[0]
+	if len(runningPods) != 1 {
+		return nil, fmt.Errorf("expected 1 pod, got %d", len(runningPods))
+	}
+
+	pod := runningPods[0]
 
 	target := &PodBackupTarget{
 		Pod:       &pod,

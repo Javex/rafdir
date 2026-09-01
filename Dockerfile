@@ -1,4 +1,4 @@
-FROM creativeprojects/resticprofile:0.29.0 AS resticprofile
+FROM ghcr.io/creativeprojects/resticprofile:0.33.1 AS resticprofile
 
 FROM alpine:latest AS builder
 RUN apk add --no-cache git go

@@ -71,6 +71,9 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 							"testKeySelector": "testValueSelector",
 						},
 					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
 						Volumes: []corev1.Volume{
@@ -154,6 +157,9 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 							"testKeySelector": "testValueSelector",
 						},
 					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
 						Volumes: []corev1.Volume{
@@ -176,6 +182,9 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 							"testKeySelector": "testValueSelector",
 						},
 					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
 						Volumes: []corev1.Volume{
@@ -194,6 +203,131 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 			nil,
 			nil,
 			"expected 1 pod, got 2",
+		},
+		{
+			"multiplePodsWithOnlyOneRunning",
+			"testDeployment",
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testDeployment",
+					Namespace: "test",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+				},
+			},
+			[]*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPod-1",
+						Namespace: "test",
+						Labels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "testNode",
+						Volumes: []corev1.Volume{
+							{
+								Name: "testPvc",
+								VolumeSource: corev1.VolumeSource{
+									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "testPvc",
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPod-2",
+						Namespace: "test",
+						Labels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodFailed,
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "testNode",
+					},
+				},
+			},
+			[]*corev1.PersistentVolumeClaim{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPvc",
+						Namespace: "test",
+					},
+				},
+			},
+			&targetExpectation{
+				PodName:   "testPod-1",
+				Namespace: "test",
+				Selector:  "testKeySelector=testValueSelector",
+			},
+			"",
+		},
+		{
+			"onlyNonRunningPods",
+			"testDeployment",
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "testDeployment",
+					Namespace: "test",
+				},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+				},
+			},
+			[]*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPod-1",
+						Namespace: "test",
+						Labels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodPending,
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "testNode",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testPod-2",
+						Namespace: "test",
+						Labels: map[string]string{
+							"testKeySelector": "testValueSelector",
+						},
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodFailed,
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "testNode",
+					},
+				},
+			},
+			nil,
+			nil,
+			"expected 1 pod, got 0",
 		},
 		{
 			"noPods",
@@ -326,6 +460,9 @@ func TestGetFolderToVolumeMapping(t *testing.T) {
 							"testKeySelector": "testValueSelector",
 						},
 					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
 						Containers: []corev1.Container{
@@ -402,6 +539,9 @@ func TestGetFolderToVolumeMapping(t *testing.T) {
 							"testKeySelector": "testValueSelector",
 						},
 					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
 						Containers: []corev1.Container{
@@ -469,6 +609,9 @@ func TestGetFolderToVolumeMapping(t *testing.T) {
 						Labels: map[string]string{
 							"testKeySelector": "testValueSelector",
 						},
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
 					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
@@ -570,6 +713,9 @@ func TestGetFolderToVolumeMapping(t *testing.T) {
 							"testKeySelector": "testValueSelector",
 						},
 					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
 						Containers: []corev1.Container{
@@ -609,6 +755,9 @@ func TestGetFolderToVolumeMapping(t *testing.T) {
 						Labels: map[string]string{
 							"testKeySelector": "testValueSelector",
 						},
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
 					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
@@ -664,6 +813,9 @@ func TestGetFolderToVolumeMapping(t *testing.T) {
 						Labels: map[string]string{
 							"testKeySelector": "testValueSelector",
 						},
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
 					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",
@@ -761,6 +913,9 @@ func TestGetFolderToVolumeMapping(t *testing.T) {
 						Labels: map[string]string{
 							"testKeySelector": "testValueSelector",
 						},
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
 					},
 					Spec: corev1.PodSpec{
 						NodeName: "testNode",

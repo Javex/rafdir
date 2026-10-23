@@ -408,7 +408,7 @@ func TestNewBackupTargetFromDeploymentName(t *testing.T) {
 				}
 			} else {
 				if err != nil {
-					t.Fatalf("expected no error, got %v", err)
+					t.Fatalf("expected no error, got %q", err)
 				}
 
 				resTarget := &targetExpectation{

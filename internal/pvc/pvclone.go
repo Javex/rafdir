@@ -66,7 +66,8 @@ func NewPvCloner(log *slog.Logger, kubeClient kubernetes.Interface, cfg PvCloner
 // times. Most other storage systems (such as TopoLVM) won't support this
 // behaviour and should rely on snapshots. Only when snapshots aren't supported
 // does it make sense to use the PvCloner instead.
-// Currently, this function only accepts the driver "nfs.csi.k8s.io" as it has
+// The function supports two volume sources: CSI and NFS.
+// For CSI, this function only accepts the driver "nfs.csi.k8s.io" as it has
 // been tested. Other drivers can be added after they've been tested to work.
 func (c *PvCloner) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
 	sourcePvcName := sourcePvc.Name
@@ -79,16 +80,6 @@ func (c *PvCloner) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *corev1
 	}
 	log = log.With("sourcePvName", sourcePv.Name)
 
-	if sourcePv.Spec.CSI == nil {
-		log.Error("Expected .spec.csi to be set, but it's nil, invalid PV")
-		return nil, fmt.Errorf("invalid PV, expected CSI object")
-	}
-
-	if driver, supportedDriver := sourcePv.Spec.CSI.Driver, "nfs.csi.k8s.io"; driver != supportedDriver {
-		log.Error("Invalid driver, not supported", "driver", driver, "supportedDriver", supportedDriver)
-		return nil, fmt.Errorf("invalid driver '%s', expected '%s'", driver, supportedDriver)
-	}
-
 	// Use the PVC as the name source because the PV will have a randomly
 	// generated name like "pvc-<uuid>". In our case, since the PV is manually
 	// created and not dynamically from a PVC, using the PVC name makes more
@@ -97,17 +88,50 @@ func (c *PvCloner) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *corev1
 	log = log.With("destPvName", destPvName)
 
 	// Create new PV from existing PV
-	destPv, err := c.clonePv(ctx, sourcePv, destPvName)
-	if err != nil {
-		log.Error("Failed to clone source PV", "err", err)
-		return nil, fmt.Errorf("Failed to clone source PV, %w", err)
+	var pvSource corev1.PersistentVolumeSource
+	switch {
+	case sourcePv.Spec.CSI != nil:
+		pvSource, err = c.getPvSourceCsi(log, sourcePv, destPvName)
+	case sourcePv.Spec.NFS != nil:
+		pvSource, err = c.getPvSourceNfs(log, sourcePv, destPvName)
+	default:
+		log.Error("Unsupported PV configuration. Only CSI & NFS are supported")
+		return nil, fmt.Errorf("unsupported PV configuration")
 	}
+
+	if err != nil {
+		log.Error("Failed to derive PV Source", "err", err)
+		return nil, fmt.Errorf("Failed to derive PV Source: %w", err)
+	}
+
+	destPv := &corev1.PersistentVolume{
+		ObjectMeta: meta.NewObjectMeta(destPvName, "", c.runSuffix),
+		Spec: corev1.PersistentVolumeSpec{
+			AccessModes:  sourcePv.Spec.AccessModes,
+			Capacity:     sourcePv.Spec.Capacity,
+			MountOptions: sourcePv.Spec.MountOptions,
+			// Always Retain because we're about to delete this one, but it's just a
+			// copy. If this were to delete, it'd delete the source data.
+			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
+			StorageClassName:              sourcePv.Spec.StorageClassName,
+			VolumeMode:                    sourcePv.Spec.VolumeMode,
+
+			PersistentVolumeSource: pvSource,
+		},
+	}
+
+	destPv, err = c.kubeClient.CoreV1().PersistentVolumes().Create(ctx, destPv, metav1.CreateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("error creating PV: %w", err)
+	}
+
+	c.log.Info("PV created", "destPvName", destPvName)
 	c.destPvName = destPv.ObjectMeta.Name
 	// Create new PVC using new PV
 	destPvc, err := c.bindPvc(ctx, destPv)
 	if err != nil {
 		log.Error("Failed to bind PVC for backup PV", "err", err)
-		return nil, fmt.Errorf("Failed to bind PVC for backup PV")
+		return nil, fmt.Errorf("Failed to bind PVC for backup PV: %w", err)
 	}
 	c.destPvcName = destPvc.ObjectMeta.Name
 
@@ -119,48 +143,56 @@ func (c *PvCloner) BackupPvcFromSourcePvc(ctx context.Context, sourcePvc *corev1
 	return destPvc, nil
 }
 
-// clonePv creates a new PV based on an existing PV. It makes a slightly
-// modified copy which can then be bound to a new PVC.
-func (c *PvCloner) clonePv(ctx context.Context, sourcePv *corev1.PersistentVolume, destPvName string) (*corev1.PersistentVolume, error) {
+// getPvSourceCsi returns the PersistentVolumeSource for a CSI-based PV
+func (c *PvCloner) getPvSourceCsi(log *slog.Logger, sourcePv *corev1.PersistentVolume, destPvName string) (corev1.PersistentVolumeSource, error) {
+	if sourcePv.Spec.CSI == nil {
+		log.Error("Expected .spec.csi to be set, but it's nil, invalid PV")
+		return corev1.PersistentVolumeSource{}, fmt.Errorf("invalid PV, expected CSI object")
+	}
+
+	if driver, supportedDriver := sourcePv.Spec.CSI.Driver, "nfs.csi.k8s.io"; driver != supportedDriver {
+		log.Error("Invalid driver, not supported", "driver", driver, "supportedDriver", supportedDriver)
+		return corev1.PersistentVolumeSource{}, fmt.Errorf("invalid driver '%s', expected '%s'", driver, supportedDriver)
+	}
+
 	// Note: The below copy process makes some assumptions about the driver, i.e.
 	// it uses fields it expects from the NFS driver. This needs to be fixed if
 	// other drivers need to be supported.
 	volumeAttributes := sourcePv.Spec.PersistentVolumeSource.CSI.VolumeAttributes
 	newAttributes, err := nfsCloneVolumeAttributes(volumeAttributes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to clone attributes: %s", err)
+		return corev1.PersistentVolumeSource{}, fmt.Errorf("failed to clone attributes: %s", err)
 	}
 
-	destPv := &corev1.PersistentVolume{
-		ObjectMeta: meta.NewObjectMeta(destPvName, "", c.runSuffix),
-		Spec: corev1.PersistentVolumeSpec{
-			AccessModes: sourcePv.Spec.AccessModes,
-			Capacity:    sourcePv.Spec.Capacity,
-			// Always Retain because we're about to delete this one, but it's just a
-			// copy. If this were to delete, it'd delete the source data.
-			PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
-			StorageClassName:              sourcePv.Spec.StorageClassName,
-			VolumeMode:                    sourcePv.Spec.VolumeMode,
-
-			PersistentVolumeSource: corev1.PersistentVolumeSource{
-				CSI: &corev1.CSIPersistentVolumeSource{
-					Driver: sourcePv.Spec.PersistentVolumeSource.CSI.Driver,
-					// VolumeHandle needs to be unique which our PV name should be
-					VolumeHandle:     destPvName,
-					VolumeAttributes: newAttributes,
-				},
-			},
+	pvSource := corev1.PersistentVolumeSource{
+		CSI: &corev1.CSIPersistentVolumeSource{
+			Driver: sourcePv.Spec.PersistentVolumeSource.CSI.Driver,
+			// VolumeHandle needs to be unique which our PV name should be
+			VolumeHandle:     destPvName,
+			VolumeAttributes: newAttributes,
 		},
 	}
 
-	destPv, err = c.kubeClient.CoreV1().PersistentVolumes().Create(ctx, destPv, metav1.CreateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("error creating PV: %w", err)
+	return pvSource, nil
+}
+
+// getPvSourceNfs returns the PersistentVolumeSource for an NFS-based PV.
+func (c *PvCloner) getPvSourceNfs(log *slog.Logger, sourcePv *corev1.PersistentVolume, destPvName string) (corev1.PersistentVolumeSource, error) {
+	nfs := sourcePv.Spec.NFS
+	if nfs == nil {
+		log.Error("Expected .spec.nfs to be set, but it's nil, invalid PV")
+		return corev1.PersistentVolumeSource{}, fmt.Errorf("invalid PV, expected NFS object")
 	}
 
-	c.log.Info("PV created", "destPvName", destPvName)
-
-	return destPv, nil
+	pvSource := corev1.PersistentVolumeSource{
+		NFS: &corev1.NFSVolumeSource{
+			Server: nfs.Server,
+			Path:   nfs.Path,
+			// Backup can always be read-only
+			ReadOnly: true,
+		},
+	}
+	return pvSource, nil
 }
 
 // nfsCloneVolumeAttributes creates a new set of attributes for the cloned PV.

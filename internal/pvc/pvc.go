@@ -41,7 +41,19 @@ func BackupPvcMethodForPvc(ctx context.Context, log *slog.Logger, kubeClient kub
 		return "", fmt.Errorf("error looking up PV: %w", err)
 	}
 
-	csi := pv.Spec.CSI
+	log = log.With("pvcName", sourcePvc.Name, "pvName", pv.Name)
+
+	switch {
+	case pv.Spec.CSI != nil:
+		return backupPvcMethodForPvcCsi(log, pv.Spec.CSI)
+	case pv.Spec.NFS != nil:
+		return BackupPvcMethodClone, nil
+	default:
+		return "", fmt.Errorf("unknown backup method, missing CSI & NFS field")
+	}
+}
+
+func backupPvcMethodForPvcCsi(log *slog.Logger, csi *corev1.CSIPersistentVolumeSource) (BackupPvcMethod, error) {
 	if csi == nil {
 		return "", fmt.Errorf("error looking up driver, PV does not have CSI field")
 	}
@@ -51,7 +63,7 @@ func BackupPvcMethodForPvc(ctx context.Context, log *slog.Logger, kubeClient kub
 		return "", fmt.Errorf("error looking up driver, PV driver is empty")
 	}
 
-	log.Debug("Found driver for PVC", "driver", driver, "pvcName", sourcePvc.Name, "pvName", pv.Name)
+	log.Debug("Found driver for PVC", "driver", driver)
 
 	switch driver {
 	case "nfs.csi.k8s.io":
